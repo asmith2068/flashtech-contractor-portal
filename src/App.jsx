@@ -237,7 +237,11 @@ function LoginScreen({ onLogin, onGuest, dbError }) {
         if (!data || data.password_hash !== hash) throw new Error("Wrong email or password.");
         onLogin(data);
       } else {
-        if (!f.name || !f.company || !f.email || !f.distributor || f.password.length < 4) throw new Error("Fill in all required fields (name, company, email, distributor; password at least 4 characters).");
+        if (!f.name.trim()) throw new Error("Please enter your name.");
+        if (!f.company.trim()) throw new Error("Please enter your company name.");
+        if (!f.distributor.trim()) throw new Error("Please enter your distributor (who you order through).");
+        if (!f.email.trim()) throw new Error("Please enter your email.");
+        if (f.password.length < 4) throw new Error("Password must be at least 4 characters.");
         const row = { email: f.email.trim().toLowerCase(), password_hash: hash, name: f.name, company: f.company, phone: f.phone, distributor: f.distributor, sales_rep: f.salesRep, role: "contractor" };
         const { data, error } = await supabase.from("portal_users").insert(row).select().single();
         if (error) throw new Error(error.code === "23505" ? "An account with that email already exists." : error.message);
