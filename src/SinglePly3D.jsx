@@ -47,7 +47,19 @@ export default function SinglePly3D({ geo, materialCode = "TPO-G", split = false
 
   let rims = [], shadowPts;
 
-  if (isSquare) {
+  if (geo.shape === "scupper") {
+    // Rectangular through-wall scupper: front flange frame + throat box going back (+z).
+    const { w, h, throat, flange } = geo;
+    const rect = (hw, hh, z) => [[-hw, -hh, z], [hw, -hh, z], [hw, hh, z], [-hw, hh, z]];
+    const oc = rect(w / 2 + flange, h / 2 + flange, 0);   // flange outer (front)
+    const ic = rect(w / 2, h / 2, 0);                      // opening (front)
+    const bk = rect(w / 2, h / 2, throat);                 // opening (back)
+    for (let i = 0; i < 4; i++) { const j = (i + 1) % 4; pushQuad(oc[i], oc[j], ic[j], ic[i]); }  // flange frame
+    for (let i = 0; i < 4; i++) { const j = (i + 1) % 4; pushQuad(ic[i], ic[j], bk[j], bk[i]); }  // throat walls
+    const close = (a) => [...a, a[0]].map((m) => proj(...m));
+    rims = [{ pts: close(oc), w: 6 }, { pts: close(ic), w: 7 }, { pts: close(bk), w: 9 }];
+    shadowPts = close(oc);
+  } else if (isSquare) {
     const { half, height: H, flange } = geo;
     const b = sq(half, 0), tp = sq(half, H), ci = sq(half, 0), co = sq(half + flange, 0);
     for (let i = 0; i < 4; i++) { const j = (i + 1) % 4; pushQuad(b[i], b[j], tp[j], tp[i]); }       // sleeve walls
@@ -82,7 +94,7 @@ export default function SinglePly3D({ geo, materialCode = "TPO-G", split = false
   const shade = (b) => `hsl(${mat.hue} ${mat.sat}% ${Math.max(16, Math.min(88, mat.lum * (0.45 + 0.75 * b)))}%)`;
   const edge = `hsl(${mat.hue} ${mat.sat + 6}% ${Math.max(12, mat.lum - 40)}%)`;
   const poly = (pts) => pts.map((p) => `${p[0]},${p[1]}`).join(" ");
-  const label = (geo.tilt ? "mitered " : "") + (isSquare ? "square wrap" : geo.shape === "cone" ? "conical boot" : "cylindrical boot");
+  const label = geo.shape === "scupper" ? "scupper drain" : (geo.tilt ? "mitered " : "") + (isSquare ? "square wrap" : geo.shape === "cone" ? "conical boot" : "cylindrical boot");
 
   return (
     <svg viewBox={vb} style={{ width: "100%", height, display: "block" }} preserveAspectRatio="xMidYMid meet">

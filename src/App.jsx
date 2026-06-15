@@ -6,6 +6,7 @@ import {
   SEED_PRODUCTS, MATERIALS, COATED_METALS, MEMBRANE_TYPES, MEMBRANE_COLORS, matByCode, anyMat, FLASHING_TYPES, typeById,
   profileGirth, profileBends, piecePrice, customPartNumber, customDescription, defaultParams,
   membranePrice, membranePartNumber, membraneDescription,
+  scupperPrice, scupperPartNumber, scupperSides, scupperTier,
 } from "./catalog.js";
 
 // ─── UTILITIES ───────────────────────────────────────────────
@@ -24,6 +25,42 @@ const uid = () => Math.random().toString(36).slice(2, 10);
 async function sha256(text) {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// ─── PRINTABLE QUOTE ─────────────────────────────────────────
+const FT_INFO = { addr: "215 Denny Way Suite D, El Cajon, CA 92020", phone: "(619) 334-9491", email: "sales@flash-techinc.com" };
+const unitLabel = (u) => (u === "lf" ? "LF" : u === "pc" ? "pcs" : "ea");
+function printQuote({ kind = "quote", reqId, created, status, billTo, meta = {}, items, subtotal, quotedTotal }) {
+  const esc = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+  const rows = items.map((i) => `<tr><td>${esc(i.sku || "")}</td><td>${esc(i.description)}</td><td class="c">${i.qty} ${unitLabel(i.unit)}</td><td class="r">${fmt(i.unit_price)}</td><td class="r">${fmt(i.line_total)}</td></tr>`).join("");
+  const total = quotedTotal != null ? quotedTotal : subtotal;
+  const heading = kind === "order" ? "ORDER" : "QUOTE";
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Flash-Tech ${heading}${reqId ? " #" + reqId.slice(0, 8) : ""}</title>
+<style>body{font-family:Arial,Helvetica,sans-serif;color:#23282b;margin:34px;}
+.hd{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #5aa01e;padding-bottom:12px}
+.hd h1{margin:0;font-size:24px;letter-spacing:.5px}.grn{color:#5aa01e}
+.sub{font-size:12px;color:#6a7278;margin-top:4px}
+.doc{text-align:right}.doc h2{margin:0;font-size:20px;color:#2b2f31}
+.meta{display:flex;justify-content:space-between;gap:24px;margin:20px 0;font-size:13px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{background:#2b2f31;color:#fff;text-align:left;padding:9px 8px}
+td{padding:7px 8px;border-bottom:1px solid #e3e6e8}.c{text-align:center}.r{text-align:right}
+.tot{text-align:right;margin-top:16px;font-size:14px}.tot .big{font-size:22px;color:#5aa01e;font-weight:bold}
+.note{margin-top:28px;font-size:11px;color:#6a7278;border-top:1px solid #e3e6e8;padding-top:10px}
+button{margin-bottom:18px;padding:9px 18px;background:#5aa01e;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer}
+@media print{button{display:none}}</style></head><body>
+<button onclick="window.print()">🖨 Print / Save as PDF</button>
+<div class="hd"><div><h1>FLASH-<span class="grn">TECH</span></h1><div class="sub">Single-Ply Roofing Accessories<br>${FT_INFO.addr}<br>${FT_INFO.phone} &middot; ${FT_INFO.email}</div></div>
+<div class="doc"><h2>${heading}</h2>${reqId ? `<div class="sub">#${reqId.slice(0, 8)}</div>` : ""}<div class="sub">${fmtDate(created || new Date().toISOString())}</div>${status ? `<div class="sub">Status: ${esc(status)}</div>` : ""}</div></div>
+<div class="meta"><div><b>Prepared For</b><br>${billTo ? `${esc(billTo.company || "")}<br>${esc(billTo.name || "")}<br>${esc(billTo.phone || "")}<br>${esc(billTo.email || "")}` : "&mdash;"}</div>
+<div class="r">${meta.job_name ? `<b>Job:</b> ${esc(meta.job_name)}<br>` : ""}${meta.po_number ? `<b>PO #:</b> ${esc(meta.po_number)}<br>` : ""}${meta.needed_by ? `<b>Needed By:</b> ${fmtDate(meta.needed_by)}<br>` : ""}${billTo && billTo.distributor ? `<b>Distributor:</b> ${esc(billTo.distributor)}<br>` : ""}${billTo && billTo.sales_rep ? `<b>Sales Rep:</b> ${esc(billTo.sales_rep)}` : ""}</div></div>
+<table><thead><tr><th>Part #</th><th>Description</th><th class="c">Qty</th><th class="r">Unit Price</th><th class="r">Total</th></tr></thead><tbody>${rows}</tbody></table>
+<div class="tot">${quotedTotal != null ? `Estimated subtotal: ${fmt(subtotal)}<br>Flash-Tech ${heading.toLowerCase()} total: ` : "Estimated total: "}<span class="big">${fmt(total)}</span></div>
+<div class="note">${kind === "quote" ? "This is an estimate; final pricing is confirmed by Flash-Tech. " : ""}All prices in USD. Thank you for your business.</div>
+</body></html>`;
+  const w = window.open("", "_blank");
+  if (!w) { alert("Please allow pop-ups for this site to print the quote."); return; }
+  w.document.write(html); w.document.close(); w.focus();
 }
 
 const STATUS_META = {
@@ -64,6 +101,7 @@ const IC = {
   x: <I d={<><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></>} />,
   trash: <I s={16} d={<><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></>} />,
   send: <I s={16} d={<><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></>} />,
+  print: <I s={16} d={<><polyline points="6 9 6 2 18 2 18 9" /><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" /><rect x="6" y="14" width="12" height="8" /></>} />,
   alert: <I d={<><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></>} />,
   back: <I d={<><line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" /></>} />,
   plus: <I s={16} d={<><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></>} />,
@@ -71,7 +109,7 @@ const IC = {
 
 // ─── STYLES ──────────────────────────────────────────────────
 const CSS = `
-:root { --grn:#15803d; --lime:#a3e635; --ink:#1f2937; --mut:#6b7280; --bg:#f3f4f6; --card:#fff; --line:#e5e7eb; --dark:#0f172a; --red:#dc2626; --amber:#d97706; }
+:root { --grn:#5aa01e; --grn-d:#4a8418; --lime:#8cc63f; --ink:#23282b; --mut:#6a7278; --bg:#f4f5f5; --card:#fff; --line:#e3e6e8; --dark:#2b2f31; --darker:#222627; --red:#dc2626; --amber:#d97706; }
 * { box-sizing:border-box; margin:0; padding:0; }
 body { font-family:'Segoe UI',system-ui,-apple-system,sans-serif; background:var(--bg); color:var(--ink); }
 button { font-family:inherit; cursor:pointer; }
@@ -100,7 +138,7 @@ label { font-size:12px; font-weight:600; color:var(--mut); display:block; margin
 .topbar .sub { color:var(--mut); font-size:13px; margin-top:2px; }
 /* BUTTONS */
 .btn { display:inline-flex; align-items:center; gap:7px; padding:10px 16px; border-radius:8px; border:none; font-size:14px; font-weight:600; }
-.btn-p { background:var(--grn); color:#fff; } .btn-p:hover { background:#166534; }
+.btn-p { background:var(--grn); color:#fff; } .btn-p:hover { background:var(--grn-d); }
 .btn-lime { background:var(--lime); color:#14532d; } .btn-lime:hover { background:#bef264; }
 .btn-o { background:#fff; border:1px solid var(--line); color:var(--ink); } .btn-o:hover { border-color:var(--grn); }
 .btn-d { background:#fef2f2; color:var(--red); } .btn-d:hover { background:#fee2e2; }
@@ -154,7 +192,7 @@ tr.click:hover { background:#f0fdf4; cursor:pointer; }
 .spec div { background:#f8fafc; border:1px solid var(--line); border-radius:8px; padding:9px 11px; }
 .spec b { display:block; font-size:15px; } .spec span { font-size:11px; color:var(--mut); text-transform:uppercase; font-weight:600; }
 /* LOGIN */
-.login { min-height:100vh; display:flex; align-items:center; justify-content:center; background:linear-gradient(150deg,#0f172a 0%,#14532d 100%); padding:18px; }
+.login { min-height:100vh; display:flex; align-items:center; justify-content:center; background:linear-gradient(150deg,#222627 0%,#3a4a22 60%,var(--grn) 140%); padding:18px; }
 .lbox { background:#fff; border-radius:16px; padding:32px; width:100%; max-width:420px; }
 .lbox h1 { font-size:22px; margin-bottom:4px; } .lbox h1 span { color:var(--grn); }
 .lbox .tabs { display:flex; gap:6px; margin:18px 0 16px; background:var(--bg); border-radius:9px; padding:4px; }
@@ -347,10 +385,15 @@ function BuilderPage({ guest, onAddToCart, onSavePart }) {
   // single-ply membrane path
   const geo = useMemo(() => (isSheet ? null : t.geometry(params)), [isSheet, t, params]);
   const split = !!params.split;
+  const isScupper = !isSheet && geo && geo.shape === "scupper";
 
-  const perPiece = isSheet ? piecePrice(girth, bends, lenFt, matCode) : membranePrice(geo, matCode, split, params.mil);
+  const perPiece = isSheet ? piecePrice(girth, bends, lenFt, matCode)
+    : isScupper ? scupperPrice(geo, matCode)
+    : membranePrice(geo, matCode, split, params.mil);
   const perLF = isSheet ? Math.round((perPiece / lenFt) * 100) / 100 : null;
-  const partNo = isSheet ? customPartNumber(typeId, matCode, girth) : membranePartNumber(typeId, matCode, geo, split);
+  const partNo = isSheet ? customPartNumber(typeId, matCode, girth)
+    : isScupper ? scupperPartNumber(matCode, geo)
+    : membranePartNumber(typeId, matCode, geo, split);
   const desc = isSheet ? customDescription(typeId, matCode, params, lenFt, girth) : membraneDescription(typeId, matCode, params, split);
   const total = Math.round(perPiece * pieces * 100) / 100;
 
@@ -460,6 +503,12 @@ function BuilderPage({ guest, onAddToCart, onSavePart }) {
             <div><span>Per Piece</span><b>{fmt(perPiece)}</b></div>
             <div><span>Per Lin. Ft</span><b>{fmt(perLF)}</b></div>
             <div><span>{pieces} pcs ({pieces * lenFt} LF)</span><b>{fmt(total)}</b></div>
+          </>) : isScupper ? (<>
+            <div><span>Opening</span><b>{geo.w}"×{geo.h}"</b></div>
+            <div><span>Throat</span><b>{geo.throat}"</b></div>
+            <div><span>4 Sides</span><b>{scupperSides(geo.w, geo.h)}"</b></div>
+            <div><span>Each</span><b>{fmt(perPiece)}</b></div>
+            <div><span>{pieces} each</span><b>{fmt(total)}</b></div>
           </>) : (<>
             <div><span>{geo.shape === "square" ? "Tube" : geo.shape === "cone" ? "Base ⌀" : "Pipe ⌀"}</span><b>{geo.shape === "square" ? `${geo.half * 2}"×${geo.half * 2}"` : `${geo.botR * 2}"`}</b></div>
             <div><span>{geo.tilt ? "Miter" : geo.shape === "cone" ? "Top ⌀" : "Height"}</span><b>{geo.tilt ? `${geo.tilt}°` : geo.shape === "cone" ? `${geo.topR * 2}"` : `${geo.height}"`}</b></div>
@@ -509,10 +558,11 @@ function MyPartsPage({ parts, onAdd, onDel }) {
 }
 
 // ─── CART / SUBMIT REQUEST ───────────────────────────────────
-function CartPage({ cart, onRemove, onClear, onSubmit, busy }) {
+function CartPage({ cart, onRemove, onClear, onSubmit, busy, user }) {
   const [meta, setMeta] = useState({ req_type: "quote", job_name: "", po_number: "", needed_by: "", notes: "" });
   const subtotal = cart.reduce((s, i) => s + i.line_total, 0);
   const set = (k) => (e) => setMeta({ ...meta, [k]: e.target.value });
+  const doPrint = () => printQuote({ kind: meta.req_type, billTo: user, meta, items: cart, subtotal });
   if (!cart.length) return <div className="card" style={{ color: "var(--mut)" }}>Your cart is empty — add parts from the Catalog or the Custom Flashing Builder.</div>;
   return (
     <div className="g2" style={{ gridTemplateColumns: "1.4fr 1fr", alignItems: "start" }}>
@@ -531,7 +581,10 @@ function CartPage({ cart, onRemove, onClear, onSubmit, busy }) {
             <tr><td colSpan="3" style={{ textAlign: "right", fontWeight: 700 }}>Estimated Subtotal</td><td style={{ fontWeight: 800 }}>{fmt(subtotal)}</td><td></td></tr>
           </tbody>
         </table>
-        <button className="btn btn-o btn-sm" style={{ marginTop: 10 }} onClick={onClear}>Clear cart</button>
+        <div className="row" style={{ marginTop: 10 }}>
+          <button className="btn btn-o btn-sm" onClick={onClear}>Clear cart</button>
+          <button className="btn btn-o btn-sm" onClick={doPrint}>{IC.print}&nbsp;Print Quote</button>
+        </div>
       </div>
       <div className="card">
         <div className="fld"><label>Request Type</label>
@@ -557,14 +610,19 @@ function CartPage({ cart, onRemove, onClear, onSubmit, busy }) {
 }
 
 // ─── REQUEST DETAIL (shared contractor/admin) ────────────────
-function RequestDetail({ req, items, msgs, role, contractor, onBack, onSend, onStatus, onQuoteTotal }) {
+function RequestDetail({ req, items, msgs, role, contractor, user, onBack, onSend, onStatus, onQuoteTotal }) {
   const [body, setBody] = useState("");
   const [quote, setQuote] = useState(req.admin_quote_total || "");
   const myItems = items.filter((i) => i.request_id === req.id);
   const thread = msgs.filter((m) => m.request_id === req.id);
+  const doPrint = () => printQuote({ kind: req.req_type, reqId: req.id, created: req.created_at, status: STATUS_META[req.status]?.label,
+    billTo: contractor || user, meta: req, items: myItems, subtotal: req.subtotal, quotedTotal: req.admin_quote_total });
   return (
     <div>
-      <button className="btn btn-o btn-sm" onClick={onBack} style={{ marginBottom: 14 }}>{IC.back}&nbsp;Back to all requests</button>
+      <div className="row" style={{ marginBottom: 14, justifyContent: "space-between" }}>
+        <button className="btn btn-o btn-sm" onClick={onBack}>{IC.back}&nbsp;Back to all requests</button>
+        <button className="btn btn-o btn-sm" onClick={doPrint}>{IC.print}&nbsp;Print Quote</button>
+      </div>
       <div className="g2" style={{ gridTemplateColumns: "1.5fr 1fr", alignItems: "start" }}>
         <div className="card">
           <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap", marginBottom: 4 }}>
@@ -978,11 +1036,11 @@ export default function App() {
           {page === "customers" && isAdmin && <AdminCustomers contractors={contractors} requests={requests} />}
           {page === "catalog" && !isAdmin && <CatalogPage products={products} onAdd={addProduct} />}
           {page === "builder" && !isAdmin && <BuilderPage guest={false} onAddToCart={addCustom} onSavePart={savePart} />}
-          {page === "cart" && !isAdmin && <CartPage cart={cart} onRemove={(k) => setCart((c) => c.filter((i) => i.key !== k))} onClear={() => setCart([])} onSubmit={submitRequest} busy={busy} />}
+          {page === "cart" && !isAdmin && <CartPage cart={cart} onRemove={(k) => setCart((c) => c.filter((i) => i.key !== k))} onClear={() => setCart([])} onSubmit={submitRequest} busy={busy} user={session} />}
           {page === "parts" && !isAdmin && <MyPartsPage parts={parts} onAdd={addCustom} onDel={delPart} />}
           {page === "requests" && (curReq ? (
             <RequestDetail req={curReq} items={items} msgs={msgs} role={role}
-              contractor={isAdmin ? contractorsById[curReq.contractor_id] : null}
+              contractor={isAdmin ? contractorsById[curReq.contractor_id] : null} user={session}
               onBack={() => setSelReq(null)} onSend={sendMsg} onStatus={setStatus} onQuoteTotal={setQuoteTotal} />
           ) : (
             <RequestList requests={requests} msgs={msgs} role={role} contractorsById={contractorsById} onOpen={openRequest} />
