@@ -8,11 +8,13 @@
 -- 1. PORTAL USERS (contractors + Flash-Tech admins)
 CREATE TABLE IF NOT EXISTS portal_users (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  email TEXT UNIQUE NOT NULL,
+  email TEXT UNIQUE NOT NULL,           -- login id (email for contractors, username ok for admins)
   password_hash TEXT NOT NULL,          -- SHA-256 hex of the password
   name TEXT NOT NULL,
   company TEXT,
   phone TEXT,
+  distributor TEXT,                     -- where the contractor orders through
+  sales_rep TEXT,                       -- their sales rep at that distributor
   role TEXT NOT NULL DEFAULT 'contractor' CHECK (role IN ('contractor', 'admin')),
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -93,8 +95,7 @@ CREATE TABLE IF NOT EXISTS portal_messages (
 -- (password_hash is SHA-256 of the password)
 -- =====================================================
 INSERT INTO portal_users (email, password_hash, name, company, role) VALUES
-  ('admin@flash-techinc.com', '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918', 'Flash-Tech Admin', 'Flash-Tech Mfg, Inc.', 'admin'),
-  ('demo@contractor.com', '03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4', 'Demo Contractor', 'Demo Roofing Co.', 'contractor')
+  ('andrew', '64502d55e7e89f45383c0e29ec9c4ae1826da6a5fcd7122b69c1cc2ba059140c', 'Andrew', 'Flash-Tech Mfg, Inc.', 'admin')
 ON CONFLICT (email) DO NOTHING;
 
 -- =====================================================

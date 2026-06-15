@@ -220,7 +220,7 @@ function Bell({ items, onPick }) {
 // ─── LOGIN / REGISTER ────────────────────────────────────────
 function LoginScreen({ onLogin, onGuest, dbError }) {
   const [tab, setTab] = useState("in");
-  const [f, setF] = useState({ email: "", password: "", name: "", company: "", phone: "" });
+  const [f, setF] = useState({ email: "", password: "", name: "", company: "", phone: "", distributor: "", salesRep: "" });
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
@@ -237,8 +237,8 @@ function LoginScreen({ onLogin, onGuest, dbError }) {
         if (!data || data.password_hash !== hash) throw new Error("Wrong email or password.");
         onLogin(data);
       } else {
-        if (!f.name || !f.company || !f.email || f.password.length < 4) throw new Error("Fill in all fields (password at least 4 characters).");
-        const row = { email: f.email.trim().toLowerCase(), password_hash: hash, name: f.name, company: f.company, phone: f.phone, role: "contractor" };
+        if (!f.name || !f.company || !f.email || !f.distributor || f.password.length < 4) throw new Error("Fill in all required fields (name, company, email, distributor; password at least 4 characters).");
+        const row = { email: f.email.trim().toLowerCase(), password_hash: hash, name: f.name, company: f.company, phone: f.phone, distributor: f.distributor, sales_rep: f.salesRep, role: "contractor" };
         const { data, error } = await supabase.from("portal_users").insert(row).select().single();
         if (error) throw new Error(error.code === "23505" ? "An account with that email already exists." : error.message);
         onLogin(data);
@@ -263,8 +263,12 @@ function LoginScreen({ onLogin, onGuest, dbError }) {
             <div className="fld"><label>Your Name</label><input value={f.name} onChange={set("name")} placeholder="Mike Rivera" /></div>
             <div className="fld"><label>Company</label><input value={f.company} onChange={set("company")} placeholder="Rivera Roofing LLC" /></div>
             <div className="fld"><label>Phone</label><input value={f.phone} onChange={set("phone")} placeholder="(619) 555-0123" /></div>
+            <div className="g2">
+              <div className="fld"><label>Distributor</label><input value={f.distributor} onChange={set("distributor")} placeholder="ABC Supply, SRS, Beacon…" /></div>
+              <div className="fld"><label>Sales Rep (optional)</label><input value={f.salesRep} onChange={set("salesRep")} placeholder="Rep name" /></div>
+            </div>
           </>)}
-          <div className="fld"><label>Email</label><input type="email" value={f.email} onChange={set("email")} placeholder="you@company.com" /></div>
+          <div className="fld"><label>{tab === "in" ? "Email or Username" : "Email"}</label><input type={tab === "in" ? "text" : "email"} value={f.email} onChange={set("email")} placeholder={tab === "in" ? "you@company.com" : "you@company.com"} /></div>
           <div className="fld"><label>Password</label><input type="password" value={f.password} onChange={set("password")} /></div>
           <button className="btn btn-p" style={{ width: "100%", justifyContent: "center", marginTop: 4 }} disabled={busy}>
             {busy ? "Working..." : tab === "in" ? "Sign In" : "Create Account"}
@@ -565,7 +569,7 @@ function RequestDetail({ req, items, msgs, role, contractor, onBack, onSend, onS
           </div>
           <div style={{ fontSize: 13, color: "var(--mut)", marginBottom: 12 }}>
             #{req.id.slice(0, 8)} · {fmtDateTime(req.created_at)}
-            {contractor && <> · <b style={{ color: "var(--ink)" }}>{contractor.company}</b> ({contractor.name}{contractor.phone ? `, ${contractor.phone}` : ""})</>}
+            {contractor && <> · <b style={{ color: "var(--ink)" }}>{contractor.company}</b> ({contractor.name}{contractor.phone ? `, ${contractor.phone}` : ""}){contractor.distributor ? <> · Distributor: <b style={{ color: "var(--ink)" }}>{contractor.distributor}</b></> : ""}{contractor.sales_rep ? ` · Rep: ${contractor.sales_rep}` : ""}</>}
             {req.po_number && <> · PO {req.po_number}</>}
             {req.needed_by && <> · Needed by {fmtDate(req.needed_by)}</>}
           </div>
@@ -730,15 +734,16 @@ function AdminDashboard({ requests, msgs, contractorsById, onOpen }) {
 function AdminCustomers({ contractors, requests }) {
   return (
     <div className="card">
-      <table><thead><tr><th>Company</th><th>Contact</th><th>Email</th><th>Phone</th><th>Requests</th><th>Joined</th></tr></thead>
+      <table><thead><tr><th>Company</th><th>Contact</th><th>Email</th><th>Phone</th><th>Distributor</th><th>Sales Rep</th><th>Requests</th><th>Joined</th></tr></thead>
         <tbody>
           {contractors.map((c) => (
             <tr key={c.id}>
               <td style={{ fontWeight: 700 }}>{c.company || "—"}</td><td>{c.name}</td><td>{c.email}</td><td>{c.phone || "—"}</td>
+              <td>{c.distributor || "—"}</td><td>{c.sales_rep || "—"}</td>
               <td>{requests.filter((r) => r.contractor_id === c.id).length}</td><td>{fmtDate(c.created_at)}</td>
             </tr>
           ))}
-          {contractors.length === 0 && <tr><td colSpan="6" style={{ color: "var(--mut)" }}>No contractor accounts yet.</td></tr>}
+          {contractors.length === 0 && <tr><td colSpan="8" style={{ color: "var(--mut)" }}>No contractor accounts yet.</td></tr>}
         </tbody>
       </table>
     </div>
