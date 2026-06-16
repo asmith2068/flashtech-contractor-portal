@@ -261,6 +261,7 @@ function LoginScreen({ onLogin, onGuest, dbError }) {
   const [f, setF] = useState({ email: "", password: "", name: "", company: "", phone: "", distributor: "", salesRep: "" });
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const [forgot, setForgot] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
 
   const submit = async (e) => {
@@ -316,6 +317,12 @@ function LoginScreen({ onLogin, onGuest, dbError }) {
             {busy ? "Working..." : tab === "in" ? "Sign In" : "Create Account"}
           </button>
         </form>
+        {tab === "in" && (
+          <div style={{ marginTop: 10, textAlign: "center" }}>
+            <button type="button" onClick={() => setForgot(!forgot)} style={{ background: "none", border: "none", color: "var(--grn)", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Forgot your password?</button>
+            {forgot && <div className="note" style={{ marginTop: 8, textAlign: "left" }}>No problem — contact Flash-Tech and we'll reset it for you right away:<br /><b>(619) 334-9491</b> · <b>sales@flash-techinc.com</b></div>}
+          </div>
+        )}
         <button className="btn btn-o" style={{ width: "100%", justifyContent: "center", marginTop: 10 }} onClick={onGuest}>
           {IC.wrench}&nbsp;Try the Custom Flashing Builder (no account)
         </button>
@@ -793,22 +800,66 @@ function AdminDashboard({ requests, msgs, contractorsById, onOpen }) {
   );
 }
 
-function AdminCustomers({ contractors, requests }) {
+function AdminCustomers({ contractors, requests, onSave, onDelete }) {
+  const [edit, setEdit] = useState(null);
   return (
     <div className="card">
-      <table><thead><tr><th>Company</th><th>Contact</th><th>Email</th><th>Phone</th><th>Distributor</th><th>Sales Rep</th><th>Requests</th><th>Joined</th></tr></thead>
+      <table><thead><tr><th>Company</th><th>Contact</th><th>Login</th><th>Phone</th><th>Distributor</th><th>Sales Rep</th><th>Requests</th><th></th></tr></thead>
         <tbody>
           {contractors.map((c) => (
             <tr key={c.id}>
               <td style={{ fontWeight: 700 }}>{c.company || "—"}</td><td>{c.name}</td><td>{c.email}</td><td>{c.phone || "—"}</td>
               <td>{c.distributor || "—"}</td><td>{c.sales_rep || "—"}</td>
-              <td>{requests.filter((r) => r.contractor_id === c.id).length}</td><td>{fmtDate(c.created_at)}</td>
+              <td>{requests.filter((r) => r.contractor_id === c.id).length}</td>
+              <td style={{ whiteSpace: "nowrap" }}><button className="btn btn-o btn-sm" onClick={() => setEdit(c)}>Edit / Reset</button></td>
             </tr>
           ))}
           {contractors.length === 0 && <tr><td colSpan="8" style={{ color: "var(--mut)" }}>No contractor accounts yet.</td></tr>}
         </tbody>
       </table>
+      {edit && <ContractorForm contractor={edit} onClose={() => setEdit(null)} onSave={onSave} onDelete={onDelete} />}
     </div>
+  );
+}
+
+function ContractorForm({ contractor, onClose, onSave, onDelete }) {
+  const [f, setF] = useState({ name: contractor.name || "", company: contractor.company || "", email: contractor.email || "", phone: contractor.phone || "", distributor: contractor.distributor || "", sales_rep: contractor.sales_rep || "" });
+  const [pw, setPw] = useState("");
+  const [busy, setBusy] = useState(false);
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  const save = async () => {
+    if (!f.name.trim() || !f.email.trim()) { alert("Name and login/email are required."); return; }
+    if (pw && pw.length < 4) { alert("New password must be at least 4 characters."); return; }
+    setBusy(true);
+    const ok = await onSave(contractor.id, { name: f.name, company: f.company, email: f.email.trim().toLowerCase(), phone: f.phone, distributor: f.distributor, sales_rep: f.sales_rep }, pw || null);
+    setBusy(false);
+    if (ok) onClose();
+  };
+  return (
+    <Modal title={`Edit ${contractor.company || contractor.name}`} onClose={onClose}
+      footer={<>
+        <button className="btn btn-d" onClick={() => { if (confirm(`Delete ${contractor.name}'s account? This cannot be undone.`)) { onDelete(contractor.id); onClose(); } }}>{IC.trash}&nbsp;Delete</button>
+        <button className="btn btn-o" onClick={onClose}>Cancel</button>
+        <button className="btn btn-p" disabled={busy} onClick={save}>{busy ? "Saving..." : "Save Changes"}</button>
+      </>}>
+      <div className="g2">
+        <div className="fld"><label>Contact Name</label><input value={f.name} onChange={set("name")} /></div>
+        <div className="fld"><label>Company</label><input value={f.company} onChange={set("company")} /></div>
+      </div>
+      <div className="g2">
+        <div className="fld"><label>Login / Email</label><input value={f.email} onChange={set("email")} /></div>
+        <div className="fld"><label>Phone</label><input value={f.phone} onChange={set("phone")} /></div>
+      </div>
+      <div className="g2">
+        <div className="fld"><label>Distributor</label><input value={f.distributor} onChange={set("distributor")} /></div>
+        <div className="fld"><label>Sales Rep</label><input value={f.sales_rep} onChange={set("sales_rep")} /></div>
+      </div>
+      <div className="fld" style={{ marginTop: 6, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
+        <label>Reset Password</label>
+        <input value={pw} onChange={(e) => setPw(e.target.value)} placeholder="Type a new password to reset it (leave blank to keep current)" />
+        <div style={{ fontSize: 12, color: "var(--mut)", marginTop: 4 }}>Set a temporary password here and share it with the customer if they're locked out.</div>
+      </div>
+    </Modal>
   );
 }
 
@@ -945,6 +996,23 @@ export default function App() {
     flash("Quoted total saved.");
   };
 
+  // ── admin: manage contractor accounts ──
+  const saveContractor = async (id, fields, newPassword) => {
+    const patch = { ...fields };
+    if (newPassword) patch.password_hash = await sha256(newPassword);
+    const { error } = await supabase.from("portal_users").update(patch).eq("id", id);
+    if (error) { alert(error.code === "23505" ? "That login/email is already taken." : "Could not save: " + error.message); return false; }
+    await loadAll(session);
+    flash(newPassword ? "Customer updated & password reset." : "Customer updated.");
+    return true;
+  };
+  const deleteContractor = async (id) => {
+    const { error } = await supabase.from("portal_users").delete().eq("id", id);
+    if (error) { alert("Could not delete: " + error.message); return; }
+    setContractors((cs) => cs.filter((c) => c.id !== id));
+    flash("Customer account deleted.");
+  };
+
   // ── notifications ──
   const seenKey = session ? `ftp_seen_${session.id}` : "";
   const getSeen = () => { try { return JSON.parse(localStorage.getItem(seenKey)) || {}; } catch { return {}; } };
@@ -1033,7 +1101,7 @@ export default function App() {
           {dbError && <div className="banner">{IC.alert}<div><b>Database tables not found.</b> Run database-setup.sql in your Supabase SQL editor, then reload.</div></div>}
 
           {page === "dashboard" && isAdmin && <AdminDashboard requests={requests} msgs={msgs} contractorsById={contractorsById} onOpen={openRequest} />}
-          {page === "customers" && isAdmin && <AdminCustomers contractors={contractors} requests={requests} />}
+          {page === "customers" && isAdmin && <AdminCustomers contractors={contractors} requests={requests} onSave={saveContractor} onDelete={deleteContractor} />}
           {page === "catalog" && !isAdmin && <CatalogPage products={products} onAdd={addProduct} />}
           {page === "builder" && !isAdmin && <BuilderPage guest={false} onAddToCart={addCustom} onSavePart={savePart} />}
           {page === "cart" && !isAdmin && <CartPage cart={cart} onRemove={(k) => setCart((c) => c.filter((i) => i.key !== k))} onClear={() => setCart([])} onSubmit={submitRequest} busy={busy} user={session} />}
