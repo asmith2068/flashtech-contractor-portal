@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS portal_users (
   phone TEXT,
   distributor TEXT,                     -- where the contractor orders through
   sales_rep TEXT,                       -- their sales rep at that distributor
+  discount_pct NUMERIC DEFAULT 0,       -- % discount off all prices this contractor sees
   role TEXT NOT NULL DEFAULT 'contractor' CHECK (role IN ('contractor', 'admin')),
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
