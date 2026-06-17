@@ -27,6 +27,22 @@ async function sha256(text) {
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+// ─── EMAIL (posts to the /api/send-email serverless function; safely no-ops if not configured) ───
+const PORTAL_URL = "https://flashtech-contractor-portal.vercel.app";
+const NOTIFY_EMAIL = "sales@flash-techinc.com"; // where new-request alerts are sent
+async function sendMail(to, subject, html, replyTo) {
+  if (!to) return;
+  try { await fetch("/api/send-email", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ to, subject, html, replyTo }) }); }
+  catch (e) { console.error("email send failed", e); }
+}
+const emailShell = (heading, inner) => `<div style="font-family:Arial,Helvetica,sans-serif;background:#f2f3f2;padding:24px"><div style="max-width:560px;margin:0 auto;background:#fff;border:1px solid #e1e4e1">
+<div style="background:#000;padding:16px 22px;border-bottom:3px solid #0DD714"><span style="color:#fff;font-size:20px;font-weight:800;letter-spacing:.5px">FLASH-<span style="color:#0DD714">TECH</span></span></div>
+<div style="padding:22px;color:#1c201d"><h2 style="margin:0 0 12px;font-size:18px">${heading}</h2>${inner}</div>
+<div style="padding:14px 22px;background:#0b0d0b;color:#9aa39a;font-size:12px">Flash-Tech Mfg, Inc. &middot; 215 Denny Way Suite D, El Cajon, CA 92020 &middot; (619) 334-9491</div>
+</div></div>`;
+const mailItems = (items) => `<table style="width:100%;border-collapse:collapse;font-size:13px;margin:10px 0"><tr style="background:#2b2f31;color:#fff"><th style="text-align:left;padding:6px 8px">Part</th><th style="text-align:center;padding:6px 8px">Qty</th><th style="text-align:right;padding:6px 8px">Total</th></tr>${items.map((i) => `<tr><td style="padding:6px 8px;border-bottom:1px solid #e1e4e1">${i.sku || ""} — ${i.description}</td><td style="text-align:center;padding:6px 8px;border-bottom:1px solid #e1e4e1">${i.qty} ${i.unit === "lf" ? "LF" : i.unit === "pc" ? "pcs" : "ea"}</td><td style="text-align:right;padding:6px 8px;border-bottom:1px solid #e1e4e1">${fmt(i.line_total)}</td></tr>`).join("")}</table>`;
+const mailBtn = (label, href) => `<a href="${href}" style="display:inline-block;background:#0DD714;color:#000;font-weight:bold;padding:11px 22px;text-decoration:none;margin-top:8px">${label}</a>`;
+
 // ─── PRINTABLE QUOTE ─────────────────────────────────────────
 const FT_INFO = { addr: "215 Denny Way Suite D, El Cajon, CA 92020", phone: "(619) 334-9491", email: "sales@flash-techinc.com" };
 const unitLabel = (u) => (u === "lf" ? "LF" : u === "pc" ? "pcs" : "ea");
@@ -264,7 +280,25 @@ function LoginScreen({ onLogin, onGuest, dbError }) {
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [forgot, setForgot] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [forgotMsg, setForgotMsg] = useState("");
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+
+  const requestReset = async () => {
+    const em = forgotEmail.trim().toLowerCase();
+    if (!em) return;
+    setForgotMsg("sending");
+    try {
+      const { data } = await supabase.from("portal_users").select("id").eq("email", em).maybeSingle();
+      if (data) {
+        const token = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36);
+        await supabase.from("portal_users").update({ reset_token: token, reset_expires: new Date(Date.now() + 3600000).toISOString() }).eq("id", data.id);
+        const link = `${window.location.origin}/?reset=${token}`;
+        await sendMail(em, "Reset your Flash-Tech password", emailShell("Password Reset", `<p>We received a request to reset your Flash-Tech Portal password. This link is valid for 1 hour:</p>${mailBtn("Reset My Password", link)}<p style="font-size:12px;color:#6a7278;margin-top:14px">If you didn't request this, you can safely ignore this email.</p>`), NOTIFY_EMAIL);
+      }
+    } catch (e) { /* show generic message regardless */ }
+    setForgotMsg("sent");
+  };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -321,8 +355,14 @@ function LoginScreen({ onLogin, onGuest, dbError }) {
         </form>
         {tab === "in" && (
           <div style={{ marginTop: 10, textAlign: "center" }}>
-            <button type="button" onClick={() => setForgot(!forgot)} style={{ background: "none", border: "none", color: "var(--grn)", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Forgot your password?</button>
-            {forgot && <div className="note" style={{ marginTop: 8, textAlign: "left" }}>No problem — contact Flash-Tech and we'll reset it for you right away:<br /><b>(619) 334-9491</b> · <b>sales@flash-techinc.com</b></div>}
+            <button type="button" onClick={() => { setForgot(!forgot); setForgotMsg(""); }} style={{ background: "none", border: "none", color: "var(--grn)", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Forgot your password?</button>
+            {forgot && (forgotMsg === "sent"
+              ? <div className="note" style={{ marginTop: 8, textAlign: "left" }}>If an account exists for that email, we've sent a password-reset link. Check your inbox (and spam).</div>
+              : <div style={{ marginTop: 8, textAlign: "left" }}>
+                  <div className="fld"><label>Account Email</label><input type="email" value={forgotEmail} onChange={(e) => setForgotEmail(e.target.value)} placeholder="you@company.com" /></div>
+                  <button type="button" className="btn btn-o" style={{ width: "100%", justifyContent: "center" }} disabled={forgotMsg === "sending"} onClick={requestReset}>{forgotMsg === "sending" ? "Sending…" : "Email me a reset link"}</button>
+                  <div style={{ fontSize: 12, color: "var(--mut)", marginTop: 6 }}>Or call Flash-Tech at (619) 334-9491 and we'll reset it for you.</div>
+                </div>)}
           </div>
         )}
         <button className="btn btn-o" style={{ width: "100%", justifyContent: "center", marginTop: 10 }} onClick={onGuest}>
@@ -873,10 +913,55 @@ function ContractorForm({ contractor, onClose, onSave, onDelete }) {
   );
 }
 
+// ─── PASSWORD RESET (from emailed ?reset=token link) ─────────
+function ResetPassword({ token, onDone }) {
+  const [stage, setStage] = useState("checking"); // checking | ready | invalid | done
+  const [user, setUser] = useState(null);
+  const [pw, setPw] = useState(""); const [pw2, setPw2] = useState("");
+  const [err, setErr] = useState(""); const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    (async () => {
+      if (!hasSupabase) return setStage("invalid");
+      try {
+        const { data } = await supabase.from("portal_users").select("id,email,reset_expires").eq("reset_token", token).maybeSingle();
+        if (!data || !data.reset_expires || new Date(data.reset_expires) < new Date()) return setStage("invalid");
+        setUser(data); setStage("ready");
+      } catch { setStage("invalid"); }
+    })();
+  }, [token]);
+  const submit = async (e) => {
+    e.preventDefault(); setErr("");
+    if (pw.length < 4) return setErr("Password must be at least 4 characters.");
+    if (pw !== pw2) return setErr("Passwords don't match.");
+    setBusy(true);
+    const hash = await sha256(pw);
+    const { error } = await supabase.from("portal_users").update({ password_hash: hash, reset_token: null, reset_expires: null }).eq("id", user.id);
+    setBusy(false);
+    if (error) return setErr(error.message);
+    setStage("done");
+  };
+  return (
+    <div className="login"><div className="lbox">
+      <h1>Reset <span>Password</span></h1>
+      {stage === "checking" && <p style={{ color: "var(--mut)", marginTop: 12 }}>Checking your reset link…</p>}
+      {stage === "invalid" && <><div className="err" style={{ marginTop: 14 }}>This reset link is invalid or has expired. Request a new one from the sign-in screen.</div><button className="btn btn-p" style={{ width: "100%", justifyContent: "center", marginTop: 10 }} onClick={onDone}>Back to Sign In</button></>}
+      {stage === "ready" && <form onSubmit={submit}>
+        <div style={{ color: "var(--mut)", fontSize: 14, margin: "6px 0 14px" }}>Set a new password for <b>{user.email}</b>.</div>
+        {err && <div className="err">{err}</div>}
+        <div className="fld"><label>New Password</label><input type="password" value={pw} onChange={(e) => setPw(e.target.value)} /></div>
+        <div className="fld"><label>Confirm Password</label><input type="password" value={pw2} onChange={(e) => setPw2(e.target.value)} /></div>
+        <button className="btn btn-p" style={{ width: "100%", justifyContent: "center" }} disabled={busy}>{busy ? "Saving…" : "Set New Password"}</button>
+      </form>}
+      {stage === "done" && <><div className="note" style={{ marginTop: 14 }}>Your password has been reset. You can sign in now.</div><button className="btn btn-p" style={{ width: "100%", justifyContent: "center", marginTop: 10 }} onClick={onDone}>Go to Sign In</button></>}
+    </div></div>
+  );
+}
+
 // ─── APP ─────────────────────────────────────────────────────
 export default function App() {
   const [session, setSession] = useState(() => { try { return JSON.parse(localStorage.getItem("ftp_session")) || null; } catch { return null; } });
   const [guest, setGuest] = useState(false);
+  const [resetToken, setResetToken] = useState(() => { try { return new URLSearchParams(window.location.search).get("reset"); } catch { return null; } });
   const [page, setPage] = useState("home");
   const [products, setProducts] = useState(SEED_PRODUCTS);
   const [requests, setRequests] = useState([]);
@@ -983,10 +1068,20 @@ export default function App() {
       const lines = cart.map((i) => ({ request_id: req.id, item_kind: i.kind, sku: i.sku, description: i.description, unit: i.unit, qty: i.qty, unit_price: i.unit_price, line_total: i.line_total, detail: i.detail || null }));
       const { error: e2 } = await supabase.from("portal_request_items").insert(lines);
       if (e2) throw e2;
+      const emailItems = [...cart];
       setCart([]);
       await loadAll(session);
       setPage("requests"); setSelReq(req.id);
       flash(`${meta.req_type === "quote" ? "Quote" : "Order"} request sent to Flash-Tech!`);
+      // ── email notifications ──
+      const lbl = meta.req_type === "quote" ? "Quote" : "Order";
+      const who = `${session.company || session.name}${session.name && session.company ? ` (${session.name})` : ""}`;
+      sendMail(NOTIFY_EMAIL, `New ${lbl} request — ${session.company || session.name}`,
+        emailShell(`New ${lbl} Request`, `<p><b>${who}</b> submitted a ${meta.req_type} request${meta.job_name ? ` for <b>${meta.job_name}</b>` : ""}.</p>${session.distributor ? `<p>Distributor: <b>${session.distributor}</b>${session.sales_rep ? ` · Rep: ${session.sales_rep}` : ""}</p>` : ""}${mailItems(emailItems)}<p>Estimated subtotal: <b>${fmt(subtotal)}</b></p>${mailBtn("Open in Portal", PORTAL_URL)}`),
+        session.email);
+      sendMail(session.email, `We received your ${meta.req_type} request`,
+        emailShell(`Thanks, ${session.name}!`, `<p>We've received your ${meta.req_type} request${meta.job_name ? ` for <b>${meta.job_name}</b>` : ""}. Our team will review it and get back to you shortly.</p>${mailItems(emailItems)}<p>Estimated subtotal: <b>${fmt(subtotal)}</b> — final pricing is confirmed by Flash-Tech.</p>${mailBtn("View Your Requests", PORTAL_URL)}`),
+        NOTIFY_EMAIL);
     } catch (e) { alert("Could not submit request: " + e.message); }
     setBusy(false);
   };
@@ -998,6 +1093,16 @@ export default function App() {
     if (!error && data) {
       setMsgs((m) => [...m, data]);
       if (isAdmin && (req.status === "new" || req.status === "in_review")) setStatus(req, "responded");
+      const c = contractorsById[req.contractor_id];
+      if (isAdmin && c?.email) {
+        sendMail(c.email, `Flash-Tech replied to your ${req.req_type} request`,
+          emailShell("You have a new message", `<p>Flash-Tech responded on your request${req.job_name ? ` for <b>${req.job_name}</b>` : ""}:</p><blockquote style="border-left:3px solid #0DD714;margin:10px 0;padding:6px 14px;color:#333">${body}</blockquote>${mailBtn("View & Reply", PORTAL_URL)}`),
+          NOTIFY_EMAIL);
+      } else if (!isAdmin) {
+        sendMail(NOTIFY_EMAIL, `New message on ${req.req_type} request — ${session.company || session.name}`,
+          emailShell("New customer message", `<p><b>${session.company || session.name}</b> messaged on request${req.job_name ? ` <b>${req.job_name}</b>` : ` #${req.id.slice(0, 8)}`}:</p><blockquote style="border-left:3px solid #0DD714;margin:10px 0;padding:6px 14px;color:#333">${body}</blockquote>${mailBtn("Open in Portal", PORTAL_URL)}`),
+          session.email);
+      }
     }
   };
   const setStatus = async (req, status) => {
@@ -1009,6 +1114,10 @@ export default function App() {
     await supabase.from("portal_requests").update({ admin_quote_total: total, updated_at: new Date().toISOString() }).eq("id", req.id);
     setRequests((rs) => rs.map((r) => (r.id === req.id ? { ...r, admin_quote_total: total } : r)));
     flash("Quoted total saved.");
+    const c = contractorsById[req.contractor_id];
+    if (c?.email) sendMail(c.email, `Flash-Tech sent you a quote — ${fmt(total)}`,
+      emailShell("Your quote is ready", `<p>Flash-Tech has quoted your request${req.job_name ? ` for <b>${req.job_name}</b>` : ""}:</p><p style="font-size:24px;color:#0aa810;font-weight:bold">${fmt(total)}</p>${mailBtn("View Quote", PORTAL_URL)}`),
+      NOTIFY_EMAIL);
   };
 
   // ── admin: manage contractor accounts ──
@@ -1057,6 +1166,9 @@ export default function App() {
   const openRequest = (r) => { setSelReq(r.id); setPage("requests"); if (!isAdmin) markSeen(r.id); };
 
   // ─── render ───
+  if (resetToken && !session) {
+    return (<><style>{CSS}</style><ResetPassword token={resetToken} onDone={() => { try { window.history.replaceState({}, "", window.location.pathname); } catch (e) {} setResetToken(null); }} /></>);
+  }
   if (!session && guest) {
     return (
       <>
