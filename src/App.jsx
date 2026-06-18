@@ -29,7 +29,9 @@ async function sha256(text) {
 
 // ─── EMAIL (posts to the /api/send-email serverless function; safely no-ops if not configured) ───
 const PORTAL_URL = "https://flashtech-contractor-portal.vercel.app";
-const NOTIFY_EMAIL = "sales@flash-techinc.com"; // where new-request alerts are sent
+// TEMP: pointed at asmith@ so alerts deliver in Resend test mode. Switch back to
+// sales@flash-techinc.com once the flash-techinc.com domain is verified in Resend.
+const NOTIFY_EMAIL = "asmith@flash-techinc.com"; // where new-request alerts are sent
 async function sendMail(to, subject, html, replyTo) {
   if (!to) return;
   try { await fetch("/api/send-email", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ to, subject, html, replyTo }) }); }
