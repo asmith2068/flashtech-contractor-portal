@@ -6,7 +6,7 @@ import {
   SEED_PRODUCTS, MATERIALS, COATED_METALS, MEMBRANE_TYPES, MEMBRANE_COLORS, matByCode, anyMat, FLASHING_TYPES, typeById,
   profileGirth, profileBends, piecePrice, customPartNumber, customDescription, defaultParams,
   membranePrice, membranePartNumber, membraneDescription,
-  scupperPrice, scupperPartNumber, scupperSides, scupperTier,
+  scupperPrice, scupperPartNumber, scupperSides, scupperTier, productImage,
 } from "./catalog.js";
 
 // ─── UTILITIES ───────────────────────────────────────────────
@@ -394,10 +394,17 @@ function CatalogPage({ products, onAdd, disc = (x) => x, discPct = 0 }) {
         <input className="grow" placeholder="Search parts & part numbers..." value={q} onChange={(e) => setQ(e.target.value)} style={{ minWidth: 180 }} />
       </div>
       <div style={{ overflowX: "auto" }}>
-        <table><thead><tr><th>Part #</th><th>Description</th><th>Price</th><th style={{ width: 210 }}>Add to Request</th></tr></thead>
+        <table><thead><tr><th style={{ width: 52 }}></th><th>Part #</th><th>Description</th><th>Price</th><th style={{ width: 210 }}>Add to Request</th></tr></thead>
           <tbody>
-            {list.map((p) => (
+            {list.map((p) => {
+              const img = productImage(p);
+              return (
               <tr key={p.sku}>
+                <td style={{ width: 52 }}>
+                  {img
+                    ? <img src={img} alt="" loading="lazy" width="44" height="44" style={{ objectFit: "contain", background: "#fff", border: "1px solid var(--line)", display: "block" }} onError={(e) => { e.currentTarget.style.visibility = "hidden"; }} />
+                    : <div style={{ width: 44, height: 44, border: "1px solid var(--line)", background: "#f7f7f7" }} />}
+                </td>
                 <td style={{ fontWeight: 700, whiteSpace: "nowrap" }}>{p.sku}</td>
                 <td>{p.description}<br /><small style={{ color: "var(--mut)" }}>{p.category}</small></td>
                 <td style={{ whiteSpace: "nowrap" }}>{discPct > 0 && <s style={{ color: "var(--mut)", marginRight: 6, fontWeight: 400 }}>{fmt(p.price)}</s>}<b>{fmt(disc(p.price))}</b> / {p.unit === "lf" ? "LF" : "EA"}</td>
@@ -409,8 +416,9 @@ function CatalogPage({ products, onAdd, disc = (x) => x, discPct = 0 }) {
                   </div>
                 </td>
               </tr>
-            ))}
-            {list.length === 0 && <tr><td colSpan="4" style={{ color: "var(--mut)" }}>No parts match.</td></tr>}
+              );
+            })}
+            {list.length === 0 && <tr><td colSpan="5" style={{ color: "var(--mut)" }}>No parts match.</td></tr>}
           </tbody>
         </table>
       </div>

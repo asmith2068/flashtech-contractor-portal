@@ -171,6 +171,45 @@ export const SEED_PRODUCTS = [
   { sku: "WSA-1017", category: "Corners & Accessories", description: "Flat Roof Attachment", unit: "ea", price: 34.15 },
 ];
 
+// Product photos from flash-techinc.com (mapped by description keywords).
+// Returns a thumbnail URL, or null when there's no matching photo.
+const FT_IMG = "https://flash-techinc.com/wp-content/uploads";
+export const productImage = (p) => {
+  const d = (p.description || "").toLowerCase();
+  const cat = p.category || "";
+  // Pipe boots & flashings
+  if (d.includes("conical") && d.includes("split")) return `${FT_IMG}/2023/02/ConicalBootSplitWhite-300x300.webp`;
+  if (d.includes("conical")) return `${FT_IMG}/2023/02/ConicalBootWhite-300x300.webp`;
+  if (d.includes("square wrap") && d.includes("split")) return `${FT_IMG}/2023/02/SquareBootSplitWhite-300x300.webp`;
+  if (d.includes("square wrap")) return `${FT_IMG}/2023/02/SquareBootWhite-300x300.webp`;
+  if (d.includes("split") && (d.includes("pipe flashing") || d.includes("vent pipe"))) return `${FT_IMG}/2023/02/CircularBootSplitWhite-300x300.webp`;
+  if (d.includes("pipe flashing") || d.includes("vent pipe")) return `${FT_IMG}/2023/02/CircularBootWhite-300x300.webp`;
+  // Edge metal
+  if (d.includes("drip edge")) return `${FT_IMG}/2024/01/DripEdgeHemWhite-300x300.webp`;
+  if (d.includes("coping")) return `${FT_IMG}/2024/01/CopingMetal-300x300.webp`;
+  // Scuppers
+  if (d.includes("scupper")) return `${FT_IMG}/2023/02/ScupperWallWhite-300x300.webp`;
+  // Drains
+  if (cat === "Drains" || d.includes("drain")) return d.includes("copper") ? `${FT_IMG}/2026/03/BasketDrainComboCopper-300x300.webp` : `${FT_IMG}/2026/03/BasketDrainComboPVC-300x300.webp`;
+  // Vents
+  if (d.includes("gravity vent")) return `${FT_IMG}/2023/02/GravityVentSide-300x300.webp`;
+  if (d.includes("t-top")) return `${FT_IMG}/2023/02/TTopWhite-300x300.webp`;
+  if (d.includes("gable vent")) return `${FT_IMG}/2023/02/LouverVentWhite-300x300.webp`;
+  if (d.includes("breather")) return `${FT_IMG}/2023/02/BreatherWhite-300x300.webp`;
+  if (d.includes("turbine")) return `${FT_IMG}/2025/07/new-Turbine-Vent-300x300.webp`;
+  if (d.includes("wall mount") || d.includes("dryer")) return `${FT_IMG}/2023/02/LouverVentWhite-300x300.webp`;
+  // Sealant pockets & ovals
+  if (d.includes("sealant pocket")) return `${FT_IMG}/2023/02/PocketWhite-300x300.webp`;
+  if (d.includes("oval flashing")) return `${FT_IMG}/2023/02/OvalFlashingWhite-300x300.webp`;
+  // Corners & accessories
+  if (d.includes("injection-molded outside corner") || d.includes("injection molded outside corner")) return `${FT_IMG}/2023/02/3.5_-Injection-Molded-Outside-Corner-300x300.jpg`;
+  if (d.includes("outside corner")) return `${FT_IMG}/2023/02/ExteriorCornerPatchWhite-300x300.webp`;
+  if (d.includes("inside corner")) return `${FT_IMG}/2023/02/InteriorCornerPatchWhite-300x300.webp`;
+  if (d.includes("t-joint")) return `${FT_IMG}/2023/02/CirclePatchWhite-300x300.webp`;
+  if (d.includes("solar anchor")) return `${FT_IMG}/2024/01/Solar-Stanchion-Cross-Sect-300x300.webp`;
+  return null;
+};
+
 // ─── Sheet metal materials for the custom flashing builder ───
 // rate = $ per inch of girth, per linear foot (estimated customer pricing)
 export const MATERIALS = [
