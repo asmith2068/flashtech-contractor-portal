@@ -430,23 +430,35 @@ function BuilderPage({ guest, onAddToCart, onSavePart, disc = (x) => x, discPct 
   const t = typeById(typeId);
   const isSheet = (t.kind || "sheet") === "sheet";
 
+  // Valid/sanitized params for all math & saving — lets the inputs hold blank/partial
+  // values mid-edit (so you can clear and retype) without breaking the live preview.
+  const vp = useMemo(() => {
+    const o = { ...params };
+    for (const f of t.fields) {
+      if (f.type === "choice") continue;
+      const n = parseFloat(params[f.key]);
+      o[f.key] = isNaN(n) ? f.def : Math.max(f.min, Math.min(f.max, n));
+    }
+    return o;
+  }, [t, params]);
+
   // sheet-metal path
-  const pts = useMemo(() => (isSheet ? t.points(params) : []), [isSheet, t, params]);
+  const pts = useMemo(() => (isSheet ? t.points(vp) : []), [isSheet, t, vp]);
   const girth = isSheet ? profileGirth(pts) : 0;
   const bends = isSheet ? profileBends(pts) : 0;
   // single-ply membrane path
-  const geo = useMemo(() => (isSheet ? null : t.geometry(params)), [isSheet, t, params]);
-  const split = !!params.split;
+  const geo = useMemo(() => (isSheet ? null : t.geometry(vp)), [isSheet, t, vp]);
+  const split = !!vp.split;
   const isScupper = !isSheet && geo && geo.shape === "scupper";
 
   const perPiece = isSheet ? piecePrice(girth, bends, lenFt, matCode)
     : isScupper ? scupperPrice(geo, matCode)
-    : membranePrice(geo, matCode, split, params.mil);
+    : membranePrice(geo, matCode, split, vp.mil);
   const perLF = isSheet ? Math.round((perPiece / lenFt) * 100) / 100 : null;
   const partNo = isSheet ? customPartNumber(typeId, matCode, girth)
     : isScupper ? scupperPartNumber(matCode, geo)
     : membranePartNumber(typeId, matCode, geo, split);
-  const desc = isSheet ? customDescription(typeId, matCode, params, lenFt, girth) : membraneDescription(typeId, matCode, params, split);
+  const desc = isSheet ? customDescription(typeId, matCode, vp, lenFt, girth) : membraneDescription(typeId, matCode, vp, split);
   const total = Math.round(perPiece * pieces * 100) / 100;
 
   const pickType = (id) => {
@@ -454,8 +466,8 @@ function BuilderPage({ guest, onAddToCart, onSavePart, disc = (x) => x, discPct 
     setTypeId(id); setParams(defaultParams(id)); setMatCode(nk === "sheet" ? "G26" : "TPO-G");
   };
   const custom = isSheet
-    ? { part_number: partNo, name: name || `${t.name} ${girth}"`, flashing_type: typeId, material_code: matCode, params, girth, bends, piece_length_ft: lenFt, price_per_piece: perPiece, description: desc }
-    : { part_number: partNo, name: name || `${split ? "Split " : ""}${t.name}`, flashing_type: typeId, material_code: matCode, params, girth: null, bends: null, piece_length_ft: null, price_per_piece: perPiece, description: desc };
+    ? { part_number: partNo, name: name || `${t.name} ${girth}"`, flashing_type: typeId, material_code: matCode, params: vp, girth, bends, piece_length_ft: lenFt, price_per_piece: perPiece, description: desc }
+    : { part_number: partNo, name: name || `${split ? "Split " : ""}${t.name}`, flashing_type: typeId, material_code: matCode, params: vp, girth: null, bends: null, piece_length_ft: null, price_per_piece: perPiece, description: desc };
   const matType = matCode.split("-")[0], matColor = matCode.split("-")[1] || "G";
 
   return (
@@ -503,7 +515,8 @@ function BuilderPage({ guest, onAddToCart, onSavePart, disc = (x) => x, discPct 
             {f.type === "choice"
               ? <select value={params[f.key]} onChange={(e) => setParams({ ...params, [f.key]: e.target.value })}>{f.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select>
               : <input type="number" min={f.min} max={f.max} step={f.step || 0.5} value={params[f.key]}
-                  onChange={(e) => setParams({ ...params, [f.key]: Math.max(f.min, Math.min(f.max, parseFloat(e.target.value) || f.min)) })} />}
+                  onChange={(e) => setParams((pp) => ({ ...pp, [f.key]: e.target.value }))}
+                  onBlur={(e) => { const n = parseFloat(e.target.value); setParams((pp) => ({ ...pp, [f.key]: isNaN(n) ? f.def : Math.max(f.min, Math.min(f.max, n)) })); }} />}
           </div>
         ))}
         {t.splittable && (
@@ -569,7 +582,7 @@ function BuilderPage({ guest, onAddToCart, onSavePart, disc = (x) => x, discPct 
           </>)}
         </div>
         <div className="card" style={{ marginTop: 12, fontSize: 14 }}>
-          <b>Description:</b> {desc}{!isSheet && t.fits ? ` — ${t.fits(params)}` : ""}
+          <b>Description:</b> {desc}{!isSheet && t.fits ? ` — ${t.fits(vp)}` : ""}
           <div style={{ color: "var(--mut)", fontSize: 12, marginTop: 6 }}>Estimated customer pricing{discPct > 0 ? ` (your ${discPct}% account discount applied)` : ""} — final pricing is confirmed by Flash-Tech on your quote.</div>
         </div>
       </div>
