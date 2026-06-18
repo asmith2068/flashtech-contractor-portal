@@ -472,7 +472,7 @@ function BuilderPage({ guest, onAddToCart, onSavePart, disc = (x) => x, discPct 
 
   const pickType = (id) => {
     const nk = typeById(id).kind || "sheet";
-    setTypeId(id); setParams(defaultParams(id)); setMatCode(nk === "sheet" ? "G26" : "TPO-G");
+    setTypeId(id); setParams(defaultParams(id)); setMatCode(nk === "sheet" ? "G26" : "TPO-W");
   };
   // when a photo is identified, jump the builder to the detected type
   useEffect(() => {

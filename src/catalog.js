@@ -248,10 +248,10 @@ export const COATED_METALS = [
 const COMPOSITE_TYPES = [...MEMBRANE_TYPES, ...COATED_METALS];
 
 // Resolve a composite code ("TPO-G", "TPOC-W", or legacy "TPOG") to a render/price style.
-export const membraneStyle = (code = "TPO-G") => {
+export const membraneStyle = (code = "TPO-W") => {
   const [typeCode, colorCode] = code.includes("-") ? code.split("-") : [code.slice(0, 3), code.slice(3)];
   const tp = COMPOSITE_TYPES.find((t) => t.code === typeCode) || MEMBRANE_TYPES[0];
-  const c = MEMBRANE_COLORS.find((x) => x.code === colorCode) || MEMBRANE_COLORS[1];
+  const c = MEMBRANE_COLORS.find((x) => x.code === colorCode) || MEMBRANE_COLORS[0];
   return { code, hue: c.hue, sat: c.sat, lum: c.lum, rate: tp.rate, typeName: tp.name, colorName: c.name, name: `${tp.name} ${c.name}` };
 };
 

@@ -20,7 +20,7 @@ const proj = (x, y, z) => {
 };
 const LIGHT = (() => { const v = [-0.4, -0.72, 0.56]; const n = Math.hypot(...v); return v.map((a) => a / n); })();
 
-export default function SinglePly3D({ geo, materialCode = "TPO-G", split = false, height = 280 }) {
+export default function SinglePly3D({ geo, materialCode = "TPO-W", split = false, height = 280 }) {
   if (!geo) return null;
   const mat = anyMat(materialCode);
   const N = 60;
