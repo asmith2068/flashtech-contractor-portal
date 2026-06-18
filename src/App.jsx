@@ -120,6 +120,7 @@ const IC = {
   trash: <I s={16} d={<><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></>} />,
   send: <I s={16} d={<><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></>} />,
   print: <I s={16} d={<><polyline points="6 9 6 2 18 2 18 9" /><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" /><rect x="6" y="14" width="12" height="8" /></>} />,
+  camera: <I d={<><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" /><circle cx="12" cy="13" r="4" /></>} />,
   alert: <I d={<><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></>} />,
   back: <I d={<><line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" /></>} />,
   plus: <I s={16} d={<><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></>} />,
@@ -418,7 +419,7 @@ function CatalogPage({ products, onAdd, disc = (x) => x, discPct = 0 }) {
 }
 
 // ─── CUSTOM FLASHING BUILDER ─────────────────────────────────
-function BuilderPage({ guest, onAddToCart, onSavePart, disc = (x) => x, discPct = 0 }) {
+function BuilderPage({ guest, onAddToCart, onSavePart, disc = (x) => x, discPct = 0, detectInfo = null, detectNonce = 0 }) {
   const [typeId, setTypeId] = useState("dripEdge");
   const [matCode, setMatCode] = useState("G26");
   const [params, setParams] = useState(defaultParams("dripEdge"));
@@ -465,12 +466,23 @@ function BuilderPage({ guest, onAddToCart, onSavePart, disc = (x) => x, discPct 
     const nk = typeById(id).kind || "sheet";
     setTypeId(id); setParams(defaultParams(id)); setMatCode(nk === "sheet" ? "G26" : "TPO-G");
   };
+  // when a photo is identified, jump the builder to the detected type
+  useEffect(() => {
+    if (detectNonce && detectInfo?.typeId && typeById(detectInfo.typeId)) { pickType(detectInfo.typeId); setSaved(""); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detectNonce]);
   const custom = isSheet
     ? { part_number: partNo, name: name || `${t.name} ${girth}"`, flashing_type: typeId, material_code: matCode, params: vp, girth, bends, piece_length_ft: lenFt, price_per_piece: perPiece, description: desc }
     : { part_number: partNo, name: name || `${split ? "Split " : ""}${t.name}`, flashing_type: typeId, material_code: matCode, params: vp, girth: null, bends: null, piece_length_ft: null, price_per_piece: perPiece, description: desc };
   const matType = matCode.split("-")[0], matColor = matCode.split("-")[1] || "G";
 
   return (
+    <>
+    {detectInfo && detectNonce > 0 && (
+      <div className="note" style={{ marginBottom: 14 }}>
+        {IC.camera}&nbsp;From your photo, this looks like a <b>{detectInfo.label}</b> <span style={{ color: "var(--mut)" }}>({detectInfo.confidence} confidence)</span>{detectInfo.note ? ` — ${detectInfo.note}` : ""}. Confirm the type below and enter the sizes (change it if it's not right).
+      </div>
+    )}
     <div className="builder">
       <div className="card">
         <div className="fld"><label>Flashing Type</label>
@@ -587,6 +599,7 @@ function BuilderPage({ guest, onAddToCart, onSavePart, disc = (x) => x, discPct 
         </div>
       </div>
     </div>
+    </>
   );
 }
 
@@ -989,6 +1002,11 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [dbError, setDbError] = useState(false);
   const [toast, setToast] = useState("");
+  // camera / AI photo identify
+  const cameraRef = useRef(null);
+  const [camBusy, setCamBusy] = useState(false);
+  const [camResult, setCamResult] = useState(null); // {typeId,label,confidence,note}
+  const [camNonce, setCamNonce] = useState(0);
 
   const role = session?.role || "contractor";
   const isAdmin = role === "admin";
@@ -1039,6 +1057,41 @@ export default function App() {
   }, [session, loadAll]);
 
   const flash = (m) => { setToast(m); setTimeout(() => setToast(""), 3500); };
+
+  // ── camera: snap a photo, downscale, send to AI for type identification ──
+  const fileToBase64 = (file, maxDim = 1024) => new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+      const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL("image/jpeg", 0.8).split(",")[1]);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Couldn't read that image.")); };
+    img.src = url;
+  });
+  const onCameraFile = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setCamBusy(true);
+    try {
+      const imageBase64 = await fileToBase64(file);
+      const r = await fetch("/api/identify-flashing", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ imageBase64, mediaType: "image/jpeg" }) });
+      const data = await r.json();
+      if (data.skipped) { setPage("builder"); flash("AI photo identify isn't set up yet — pick the type manually."); }
+      else if (data.ok && data.typeId) { setCamResult(data); setCamNonce((n) => n + 1); setPage("builder"); }
+      else throw new Error(typeof data.error === "string" ? data.error : "Couldn't identify the photo");
+    } catch (ex) {
+      setPage("builder");
+      flash("Couldn't identify the photo — pick the type manually. (" + ex.message + ")");
+    }
+    setCamBusy(false);
+  };
 
   const login = (u) => { localStorage.setItem("ftp_session", JSON.stringify(u)); setSession(u); setGuest(false); setPage(u.role === "admin" ? "dashboard" : "catalog"); };
   const logout = () => { localStorage.removeItem("ftp_session"); setSession(null); setCart([]); setSelReq(null); setPage("home"); };
@@ -1230,6 +1283,14 @@ export default function App() {
               </button>
             ))}
           </nav>
+          {!isAdmin && (
+            <div style={{ padding: "0 8px 8px" }}>
+              <button className="btn btn-lime" style={{ width: "100%", justifyContent: "center" }} disabled={camBusy} onClick={() => cameraRef.current?.click()}>
+                {IC.camera}&nbsp;{camBusy ? "Identifying…" : "Snap to Identify"}
+              </button>
+              <input ref={cameraRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={onCameraFile} />
+            </div>
+          )}
           <div className="who"><b>{session.name}</b><small>{session.company || (isAdmin ? "Flash-Tech Mfg, Inc." : "")}</small>
             <button className="btn btn-o btn-sm" style={{ marginTop: 8, width: "100%", justifyContent: "center" }} onClick={logout}>{IC.out}&nbsp;Sign out</button>
           </div>
@@ -1245,7 +1306,7 @@ export default function App() {
           {page === "dashboard" && isAdmin && <AdminDashboard requests={requests} msgs={msgs} contractorsById={contractorsById} onOpen={openRequest} />}
           {page === "customers" && isAdmin && <AdminCustomers contractors={contractors} requests={requests} onSave={saveContractor} onDelete={deleteContractor} />}
           {page === "catalog" && !isAdmin && <CatalogPage products={products} onAdd={addProduct} disc={applyDisc} discPct={discPct} />}
-          {page === "builder" && !isAdmin && <BuilderPage guest={false} onAddToCart={addCustom} onSavePart={savePart} disc={applyDisc} discPct={discPct} />}
+          {page === "builder" && !isAdmin && <BuilderPage guest={false} onAddToCart={addCustom} onSavePart={savePart} disc={applyDisc} discPct={discPct} detectInfo={camResult} detectNonce={camNonce} />}
           {page === "cart" && !isAdmin && <CartPage cart={cart} onRemove={(k) => setCart((c) => c.filter((i) => i.key !== k))} onClear={() => setCart([])} onSubmit={submitRequest} busy={busy} user={session} />}
           {page === "parts" && !isAdmin && <MyPartsPage parts={parts} onAdd={addCustom} onDel={delPart} disc={applyDisc} discPct={discPct} />}
           {page === "requests" && (curReq ? (
