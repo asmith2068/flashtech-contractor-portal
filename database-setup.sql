@@ -98,7 +98,10 @@ CREATE TABLE IF NOT EXISTS portal_messages (
 -- (password_hash is SHA-256 of the password)
 -- =====================================================
 INSERT INTO portal_users (email, password_hash, name, company, role) VALUES
-  ('andrew', '64502d55e7e89f45383c0e29ec9c4ae1826da6a5fcd7122b69c1cc2ba059140c', 'Andrew', 'Flash-Tech Mfg, Inc.', 'admin')
+  ('andrew',  '64502d55e7e89f45383c0e29ec9c4ae1826da6a5fcd7122b69c1cc2ba059140c', 'Andrew', 'Flash-Tech Mfg, Inc.', 'admin'),
+  ('tiffany', '64502d55e7e89f45383c0e29ec9c4ae1826da6a5fcd7122b69c1cc2ba059140c', 'Tiffany Cook', 'Flash-Tech Mfg, Inc.', 'admin'),
+  ('lex',     '64502d55e7e89f45383c0e29ec9c4ae1826da6a5fcd7122b69c1cc2ba059140c', 'Lex', 'Flash-Tech Mfg, Inc.', 'admin'),
+  ('marissa', '64502d55e7e89f45383c0e29ec9c4ae1826da6a5fcd7122b69c1cc2ba059140c', 'Marissa', 'Flash-Tech Mfg, Inc.', 'admin')
 ON CONFLICT (email) DO NOTHING;
 
 -- =====================================================

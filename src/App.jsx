@@ -6,7 +6,7 @@ import {
   SEED_PRODUCTS, MATERIALS, COATED_METALS, MEMBRANE_TYPES, MEMBRANE_COLORS, matByCode, anyMat, FLASHING_TYPES, typeById,
   profileGirth, profileBends, piecePrice, customPartNumber, customDescription, defaultParams,
   membranePrice, membranePartNumber, membraneDescription,
-  scupperPrice, scupperPartNumber, scupperSides, scupperTier, productImage,
+  scupperPrice, scupperPartNumber, scupperSides, scupperTier, productImage, POPULAR_SKUS,
 } from "./catalog.js";
 
 // ─── UTILITIES ───────────────────────────────────────────────
@@ -381,11 +381,12 @@ function LoginScreen({ onLogin, onGuest, dbError }) {
 
 // ─── CATALOG ─────────────────────────────────────────────────
 function CatalogPage({ products, onAdd, disc = (x) => x, discPct = 0 }) {
-  const [cat, setCat] = useState("All");
+  const [cat, setCat] = useState("Popular Items");
   const [q, setQ] = useState("");
   const [qty, setQty] = useState({});
-  const cats = ["All", ...new Set(products.map((p) => p.category))];
-  const list = products.filter((p) => (cat === "All" || p.category === cat) && (p.description + p.sku).toLowerCase().includes(q.toLowerCase()));
+  const cats = ["Popular Items", "All", ...new Set(products.map((p) => p.category))];
+  const inCat = (p) => cat === "Popular Items" ? POPULAR_SKUS.has(p.sku) : (cat === "All" || p.category === cat);
+  const list = products.filter((p) => inCat(p) && (p.description + p.sku).toLowerCase().includes(q.toLowerCase()));
   return (
     <div className="card">
       {discPct > 0 && <div className="note" style={{ marginBottom: 12 }}>Your account pricing includes a <b>{discPct}% discount</b> — prices below already reflect it.</div>}

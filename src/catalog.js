@@ -171,6 +171,18 @@ export const SEED_PRODUCTS = [
   { sku: "FTA-1019", category: "Corners & Accessories", description: "Solar Anchor Boot — PVC", unit: "ea", price: 26.65 },
 ];
 
+// Curated "Popular Items" — shown as the first catalog category by default.
+export const POPULAR_SKUS = new Set([
+  "FT-1011TPO", "FT-1011PVC",   // 2" pipe wrap
+  "FT-1010TPO", "FT-1010PVC",   // 1.5" pipe wrap (split)
+  "FTT-1001TPO", "FTT-1001PVC", // 4" T-Top vent
+  "FTT-1002TPO", "FTT-1002PVC", // 6" T-Top vent
+  "FT-1037",                     // 3" TPO roof (bowl) drain
+  "FTG-1001TPO", "FTG-1001PVC", // 12" gravity vent
+  "FTG-1004TPO", "FTG-1004PVC", // 18" gravity vent
+  "FT-1001TPO", "FT-1001PVC",   // 1-6" conical boot
+]);
+
 // Product photos from flash-techinc.com (mapped by description keywords).
 // Returns a thumbnail URL, or null when there's no matching photo.
 const FT_IMG = "https://flash-techinc.com/wp-content/uploads";
