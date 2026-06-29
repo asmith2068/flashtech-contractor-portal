@@ -407,13 +407,13 @@ function ShopPage({ products, onPickCategory, onBuilder, discPct = 0 }) {
   const cats = [...new Set(products.map((p) => p.category))];
   const coneImg = rep((p) => p.sku === "FT-1001TPO") || rep((p) => p.category === "Pipe Boots & Flashings" && productImage(p));
   const edgeImg = catImg("Edge Metal");
-  const popImg = rep((p) => POPULAR_SKUS.has(p.sku) && productImage(p)) || coneImg;
+  const PIPE = "Pipe Boots & Flashings";
 
   const tiles = [
     { key: "b-cone", label: "Custom Flashings", sub: "Boots, cones, wraps & scuppers — designed to size", img: coneImg, go: true, onClick: () => onBuilder("conicalBoot") },
     { key: "b-metal", label: "Metal Builder", sub: "Drip edge, coping, gravel stop & more", img: edgeImg, go: true, onClick: () => onBuilder("dripEdge") },
-    { key: "c-pop", label: "Popular Items", sub: "Our most-ordered parts", img: popImg, onClick: () => onPickCategory("Popular Items") },
-    ...cats.map((c) => ({ key: "c-" + c, label: c, sub: "Browse catalog", img: catImg(c), onClick: () => onPickCategory(c) })),
+    { key: "c-" + PIPE, label: PIPE, sub: "Browse catalog", img: catImg(PIPE), onClick: () => onPickCategory(PIPE) },
+    ...cats.filter((c) => c !== PIPE).map((c) => ({ key: "c-" + c, label: c, sub: "Browse catalog", img: catImg(c), onClick: () => onPickCategory(c) })),
   ];
 
   return (
