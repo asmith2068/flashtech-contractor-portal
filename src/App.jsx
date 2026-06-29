@@ -407,11 +407,13 @@ function ShopPage({ products, onPickCategory, onBuilder, discPct = 0 }) {
   const cats = [...new Set(products.map((p) => p.category))];
   const coneImg = rep((p) => p.sku === "FT-1001TPO") || rep((p) => p.category === "Pipe Boots & Flashings" && productImage(p));
   const edgeImg = catImg("Edge Metal");
+  const allImg = catImg("Drains") || rep((p) => productImage(p));
   const PIPE = "Pipe Boots & Flashings";
 
   const tiles = [
-    { key: "b-cone", label: "Custom Flashings", sub: "Boots, cones, wraps & scuppers — designed to size", img: coneImg, go: true, onClick: () => onBuilder("conicalBoot") },
-    { key: "b-metal", label: "Metal Builder", sub: "Drip edge, coping, gravel stop & more", img: edgeImg, go: true, onClick: () => onBuilder("dripEdge") },
+    { key: "b-cone", label: "Custom Flashings", sub: "Boots, cones, wraps & scuppers — designed to size", img: coneImg, go: true, badge: "Builder", icon: IC.wrench, onClick: () => onBuilder("conicalBoot") },
+    { key: "b-metal", label: "Metal Builder", sub: "Drip edge, coping, gravel stop & more", img: edgeImg, go: true, badge: "Builder", icon: IC.wrench, onClick: () => onBuilder("dripEdge") },
+    { key: "catalog", label: "Full Catalog", sub: "Browse every part & price", img: allImg, go: true, badge: "All Parts", icon: IC.box, onClick: () => onPickCategory("All") },
     { key: "c-" + PIPE, label: PIPE, sub: "Browse catalog", img: catImg(PIPE), onClick: () => onPickCategory(PIPE) },
     ...cats.filter((c) => c !== PIPE).map((c) => ({ key: "c-" + c, label: c, sub: "Browse catalog", img: catImg(c), onClick: () => onPickCategory(c) })),
   ];
@@ -422,7 +424,7 @@ function ShopPage({ products, onPickCategory, onBuilder, discPct = 0 }) {
       <div className="shopgrid">
         {tiles.map((t) => (
           <button key={t.key} className={"tile" + (t.go ? " tile-go" : "")} onClick={t.onClick}>
-            {t.go && <span className="tile-badge">{IC.wrench}Builder</span>}
+            {t.badge && <span className="tile-badge">{t.icon}{t.badge}</span>}
             <div className="tile-img">
               {t.img
                 ? <img src={t.img} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.display = "none"; }} />
