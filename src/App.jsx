@@ -438,7 +438,7 @@ function ShopPage({ products, onPickCategory, onBuilder, discPct = 0 }) {
   );
 }
 
-function CatalogPage({ products, onAdd, disc = (x) => x, discPct = 0, seedCat = null, seedNonce = 0 }) {
+function CatalogPage({ products, onAdd, disc = (x) => x, discPct = 0, seedCat = null, seedNonce = 0, readOnly = false }) {
   const [cat, setCat] = useState("Popular Items");
   const [q, setQ] = useState("");
   const [qty, setQty] = useState({});
@@ -455,7 +455,7 @@ function CatalogPage({ products, onAdd, disc = (x) => x, discPct = 0, seedCat = 
         <input className="grow" placeholder="Search parts & part numbers..." value={q} onChange={(e) => setQ(e.target.value)} style={{ minWidth: 180 }} />
       </div>
       <div style={{ overflowX: "auto" }}>
-        <table><thead><tr><th style={{ width: 52 }}></th><th>Part #</th><th>Description</th><th>Price</th><th style={{ width: 210 }}>Add to Request</th></tr></thead>
+        <table><thead><tr><th style={{ width: 52 }}></th><th>Part #</th><th>Description</th><th>Price</th>{!readOnly && <th style={{ width: 210 }}>Add to Request</th>}</tr></thead>
           <tbody>
             {list.map((p) => {
               const img = productImage(p);
@@ -469,17 +469,17 @@ function CatalogPage({ products, onAdd, disc = (x) => x, discPct = 0, seedCat = 
                 <td style={{ fontWeight: 700, whiteSpace: "nowrap" }}>{p.sku}</td>
                 <td>{p.description}<br /><small style={{ color: "var(--mut)" }}>{p.category}</small></td>
                 <td style={{ whiteSpace: "nowrap" }}>{discPct > 0 && <s style={{ color: "var(--mut)", marginRight: 6, fontWeight: 400 }}>{fmt(p.price)}</s>}<b>{fmt(disc(p.price))}</b> / {p.unit === "lf" ? "LF" : "EA"}</td>
-                <td>
+                {!readOnly && <td>
                   <div className="row">
                     <input type="number" min="1" style={{ width: 86 }} placeholder={p.unit === "lf" ? "Lin. ft" : "Qty"}
                       value={qty[p.sku] || ""} onChange={(e) => setQty({ ...qty, [p.sku]: e.target.value })} />
                     <button className="btn btn-lime btn-sm" onClick={() => { const n = parseFloat(qty[p.sku]); if (n > 0) { onAdd(p, n); setQty({ ...qty, [p.sku]: "" }); } }}>{IC.plus}Add</button>
                   </div>
-                </td>
+                </td>}
               </tr>
               );
             })}
-            {list.length === 0 && <tr><td colSpan="5" style={{ color: "var(--mut)" }}>No parts match.</td></tr>}
+            {list.length === 0 && <tr><td colSpan={readOnly ? 4 : 5} style={{ color: "var(--mut)" }}>No parts match.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -1332,7 +1332,7 @@ export default function App() {
   if (!session) return (<><style>{CSS}</style><LoginScreen onLogin={login} onGuest={() => setGuest(true)} dbError={dbError} /></>);
 
   const nav = isAdmin
-    ? [["dashboard", "Dashboard", IC.home], ["requests", "Requests", IC.list], ["customers", "Customers", IC.users]]
+    ? [["dashboard", "Dashboard", IC.home], ["requests", "Requests", IC.list], ["customers", "Customers", IC.users], ["catalog", "Catalog", IC.box]]
     : [["shop", "Home", IC.home], ["catalog", "Parts Catalog", IC.box], ["builder", "Custom Flashing", IC.wrench], ["cart", "Cart / Send Request", IC.cart], ["requests", "My Requests", IC.list], ["parts", "My Saved Parts", IC.bookmark]];
 
   const titles = {
@@ -1340,7 +1340,7 @@ export default function App() {
     dashboard: ["Dashboard", "Incoming quote & order requests at a glance"],
     requests: [isAdmin ? "Quote & Order Requests" : "My Requests", isAdmin ? "Click a request to review and respond" : "Track your quotes and orders"],
     customers: ["Customers", "Contractor accounts on the portal"],
-    catalog: ["Parts Catalog", "Drip edge, coping & accessories — add by linear foot or each"],
+    catalog: [isAdmin ? "Parts Catalog" : "Parts Catalog", isAdmin ? "Full price list — search and filter by category" : "Drip edge, coping & accessories — add by linear foot or each"],
     builder: ["Custom Flashing Builder", "Dimensions in, 3D model + price out"],
     cart: ["Cart / Send Request", "Review your items and send a quote or order request"],
     parts: ["My Saved Parts", "Your saved custom flashings"],
@@ -1385,6 +1385,7 @@ export default function App() {
           {page === "dashboard" && isAdmin && <AdminDashboard requests={requests} msgs={msgs} contractorsById={contractorsById} onOpen={openRequest} />}
           {page === "customers" && isAdmin && <AdminCustomers contractors={contractors} requests={requests} onSave={saveContractor} onDelete={deleteContractor} />}
           {page === "shop" && !isAdmin && <ShopPage products={products} discPct={discPct} onPickCategory={openCategory} onBuilder={openBuilder} />}
+          {page === "catalog" && isAdmin && <CatalogPage products={products} readOnly />}
           {page === "catalog" && !isAdmin && <CatalogPage products={products} onAdd={addProduct} disc={applyDisc} discPct={discPct} seedCat={catSeed.cat} seedNonce={catSeed.nonce} />}
           {page === "builder" && !isAdmin && <BuilderPage guest={false} onAddToCart={addCustom} onSavePart={savePart} disc={applyDisc} discPct={discPct} detectInfo={camResult} detectNonce={camNonce} seedType={bSeed.type} seedNonce={bSeed.nonce} />}
           {page === "cart" && !isAdmin && <CartPage cart={cart} onRemove={(k) => setCart((c) => c.filter((i) => i.key !== k))} onClear={() => setCart([])} onSubmit={submitRequest} busy={busy} user={session} />}
