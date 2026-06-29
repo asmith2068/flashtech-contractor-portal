@@ -147,7 +147,7 @@ label { font-size:12px; font-weight:600; color:var(--mut); display:block; margin
 .side nav { flex:1; padding:10px 8px; }
 .side nav button { display:flex; align-items:center; gap:11px; width:100%; padding:11px 12px; background:none; border:none; color:#cbd5e1; font-size:14px; border-radius:0; margin-bottom:2px; text-align:left; }
 .side nav button:hover { background:#161816; color:#fff; }
-.side nav button.on { background:var(--grn); color:#000; font-weight:700; }
+.side nav button.on { background:var(--grn); color:#000; font-weight:700; box-shadow: inset 2px 2px 0 rgba(255,255,255,.45), inset -2px -2px 0 rgba(0,0,0,.30); }
 .side nav button .n { margin-left:auto; background:var(--red); color:#fff; border-radius:99px; font-size:11px; font-weight:700; padding:1px 7px; }
 .side .who { padding:14px 18px; border-top:1px solid #1a1a1a; font-size:13px; }
 .side .who b { color:#fff; display:block; }
@@ -158,17 +158,37 @@ label { font-size:12px; font-weight:600; color:var(--mut); display:block; margin
 .topbar h1 { font-size:22px; }
 .topbar .sub { color:var(--mut); font-size:13px; margin-top:2px; }
 /* BUTTONS */
-.btn { display:inline-flex; align-items:center; gap:7px; padding:10px 16px; border-radius:0; border:none; font-size:14px; font-weight:600; }
+.btn { display:inline-flex; align-items:center; gap:7px; padding:10px 16px; border-radius:0; border:none; font-size:14px; font-weight:600;
+  box-shadow: inset 1px 1px 0 rgba(255,255,255,.4), inset -2px -2px 0 rgba(0,0,0,.20), 0 2px 4px rgba(0,0,0,.22); transition:transform .06s ease, box-shadow .06s ease, background .15s; }
+.btn:hover { box-shadow: inset 1px 1px 0 rgba(255,255,255,.5), inset -2px -2px 0 rgba(0,0,0,.22), 0 3px 7px rgba(0,0,0,.26); }
+.btn:active { transform:translateY(1px); box-shadow: inset -1px -1px 0 rgba(255,255,255,.35), inset 2px 2px 0 rgba(0,0,0,.24), 0 1px 2px rgba(0,0,0,.18); }
 .btn-p { background:var(--grn); color:#000; } .btn-p:hover { background:var(--grn-d); color:#000; }
 .btn-lime { background:var(--lime); color:#14532d; } .btn-lime:hover { background:#bef264; }
 .btn-o { background:#fff; border:1px solid var(--line); color:var(--ink); } .btn-o:hover { border-color:var(--grn); }
 .btn-d { background:#fef2f2; color:var(--red); } .btn-d:hover { background:#fee2e2; }
 .btn-sm { padding:6px 11px; font-size:13px; }
-.btn:disabled { opacity:.5; cursor:not-allowed; }
+.btn:disabled { opacity:.5; cursor:not-allowed; box-shadow:none; }
 /* CARDS / STATS */
-.card { background:var(--card); border:1px solid var(--line); border-radius:0; padding:18px; }
+.card { background:var(--card); border:1px solid var(--line); border-radius:0; padding:18px; box-shadow:0 2px 7px rgba(0,0,0,.07); }
+/* SHOP / CATEGORY GRID */
+.shopgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(214px,1fr)); gap:16px; }
+.tile { display:flex; flex-direction:column; text-align:left; padding:0; background:#fff; border:1px solid var(--line); color:var(--ink); overflow:hidden; position:relative;
+  box-shadow: inset 2px 2px 0 rgba(255,255,255,.9), inset -3px -3px 0 rgba(0,0,0,.10), 0 6px 14px rgba(0,0,0,.18); transition:transform .09s ease, box-shadow .09s ease, border-color .15s; }
+.tile:hover { transform:translateY(-3px); border-color:var(--grn); box-shadow: inset 2px 2px 0 rgba(255,255,255,.9), inset -3px -3px 0 rgba(0,0,0,.10), 0 12px 24px rgba(0,0,0,.26); }
+.tile:active { transform:translateY(1px); box-shadow: inset -2px -2px 0 rgba(255,255,255,.7), inset 3px 3px 0 rgba(0,0,0,.16), 0 2px 6px rgba(0,0,0,.2); }
+.tile-img { height:148px; background:#fff; display:flex; align-items:center; justify-content:center; border-bottom:3px solid var(--grn); }
+.tile-img img { max-width:86%; max-height:128px; object-fit:contain; }
+.tile-ph { color:#cfd4cf; }
+.tile-txt { padding:12px 14px; }
+.tile-txt b { font-family:'Oswald','Barlow',sans-serif; text-transform:uppercase; font-size:16px; letter-spacing:.02em; display:block; line-height:1.15; }
+.tile-txt small { color:var(--mut); font-size:12px; display:block; margin-top:3px; }
+.tile-badge { position:absolute; top:9px; right:9px; background:var(--lime); color:#14532d; font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.05em; padding:3px 8px; display:flex; align-items:center; gap:4px;
+  box-shadow: inset 1px 1px 0 rgba(255,255,255,.5), inset -1px -1px 0 rgba(0,0,0,.18), 0 2px 4px rgba(0,0,0,.25); }
+.tile-go .tile-img { border-bottom-color:var(--lime); }
+.tile-go .tile-txt { background:var(--grn); }
+.tile-go .tile-txt b { color:#000; } .tile-go .tile-txt small { color:#0b3d0b; font-weight:600; }
 .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:14px; margin-bottom:20px; }
-.stat { background:var(--card); border:1px solid var(--line); border-radius:0; padding:16px; }
+.stat { background:var(--card); border:1px solid var(--line); border-radius:0; padding:16px; box-shadow:0 2px 7px rgba(0,0,0,.07); }
 .stat .v { font-size:26px; font-weight:800; } .stat .l { font-size:12px; color:var(--mut); font-weight:600; text-transform:uppercase; }
 .stat.warn { border-color:#fecaca; background:#fef2f2; } .stat.warn .v { color:var(--red); }
 /* TABLE */
@@ -380,13 +400,51 @@ function LoginScreen({ onLogin, onGuest, dbError }) {
 }
 
 // ─── CATALOG ─────────────────────────────────────────────────
-function CatalogPage({ products, onAdd, disc = (x) => x, discPct = 0 }) {
+// ─── SHOP HOME (category grid of 3D tiles) ───────────────────
+function ShopPage({ products, onPickCategory, onBuilder, discPct = 0 }) {
+  const rep = (pred) => { const p = products.find(pred); return p ? productImage(p) : null; };
+  const catImg = (c) => rep((p) => p.category === c && productImage(p));
+  const cats = [...new Set(products.map((p) => p.category))];
+  const coneImg = rep((p) => p.sku === "FT-1001TPO") || rep((p) => p.category === "Pipe Boots & Flashings" && productImage(p));
+  const edgeImg = catImg("Edge Metal");
+  const popImg = rep((p) => POPULAR_SKUS.has(p.sku) && productImage(p)) || coneImg;
+
+  const tiles = [
+    { key: "b-cone", label: "Custom Flashings", sub: "Boots, cones, wraps & scuppers — designed to size", img: coneImg, go: true, onClick: () => onBuilder("conicalBoot") },
+    { key: "b-metal", label: "Metal Builder", sub: "Drip edge, coping, gravel stop & more", img: edgeImg, go: true, onClick: () => onBuilder("dripEdge") },
+    { key: "c-pop", label: "Popular Items", sub: "Our most-ordered parts", img: popImg, onClick: () => onPickCategory("Popular Items") },
+    ...cats.map((c) => ({ key: "c-" + c, label: c, sub: "Browse catalog", img: catImg(c), onClick: () => onPickCategory(c) })),
+  ];
+
+  return (
+    <div className="card">
+      {discPct > 0 && <div className="note" style={{ marginBottom: 14 }}>Your account pricing includes a <b>{discPct}% discount</b> — applied automatically to every price.</div>}
+      <div className="shopgrid">
+        {tiles.map((t) => (
+          <button key={t.key} className={"tile" + (t.go ? " tile-go" : "")} onClick={t.onClick}>
+            {t.go && <span className="tile-badge">{IC.wrench}Builder</span>}
+            <div className="tile-img">
+              {t.img
+                ? <img src={t.img} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                : <div className="tile-ph">{IC.box}</div>}
+            </div>
+            <div className="tile-txt"><b>{t.label}</b><small>{t.sub}</small></div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CatalogPage({ products, onAdd, disc = (x) => x, discPct = 0, seedCat = null, seedNonce = 0 }) {
   const [cat, setCat] = useState("Popular Items");
   const [q, setQ] = useState("");
   const [qty, setQty] = useState({});
   const cats = ["Popular Items", "All", ...new Set(products.map((p) => p.category))];
   const inCat = (p) => cat === "Popular Items" ? POPULAR_SKUS.has(p.sku) : (cat === "All" || p.category === cat);
   const list = products.filter((p) => inCat(p) && (p.description + p.sku).toLowerCase().includes(q.toLowerCase()));
+  // jump to a category when arriving from the Home grid
+  useEffect(() => { if (seedNonce && seedCat) setCat(seedCat); /* eslint-disable-next-line */ }, [seedNonce]);
   return (
     <div className="card">
       {discPct > 0 && <div className="note" style={{ marginBottom: 12 }}>Your account pricing includes a <b>{discPct}% discount</b> — prices below already reflect it.</div>}
@@ -428,7 +486,7 @@ function CatalogPage({ products, onAdd, disc = (x) => x, discPct = 0 }) {
 }
 
 // ─── CUSTOM FLASHING BUILDER ─────────────────────────────────
-function BuilderPage({ guest, onAddToCart, onSavePart, disc = (x) => x, discPct = 0, detectInfo = null, detectNonce = 0 }) {
+function BuilderPage({ guest, onAddToCart, onSavePart, disc = (x) => x, discPct = 0, detectInfo = null, detectNonce = 0, seedType = null, seedNonce = 0 }) {
   const [typeId, setTypeId] = useState("dripEdge");
   const [matCode, setMatCode] = useState("G26");
   const [params, setParams] = useState(defaultParams("dripEdge"));
@@ -480,6 +538,11 @@ function BuilderPage({ guest, onAddToCart, onSavePart, disc = (x) => x, discPct 
     if (detectNonce && detectInfo?.typeId && typeById(detectInfo.typeId)) { pickType(detectInfo.typeId); setSaved(""); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detectNonce]);
+  // when arriving from a Home tile (Custom Flashings / Metal Builder)
+  useEffect(() => {
+    if (seedNonce && seedType && typeById(seedType)) { pickType(seedType); setSaved(""); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seedNonce]);
   const custom = isSheet
     ? { part_number: partNo, name: name || `${t.name} ${girth}"`, flashing_type: typeId, material_code: matCode, params: vp, girth, bends, piece_length_ft: lenFt, price_per_piece: perPiece, description: desc }
     : { part_number: partNo, name: name || `${split ? "Split " : ""}${t.name}`, flashing_type: typeId, material_code: matCode, params: vp, girth: null, bends: null, piece_length_ft: null, price_per_piece: perPiece, description: desc };
@@ -999,7 +1062,7 @@ export default function App() {
   const [session, setSession] = useState(() => { try { return JSON.parse(localStorage.getItem("ftp_session")) || null; } catch { return null; } });
   const [guest, setGuest] = useState(false);
   const [resetToken, setResetToken] = useState(() => { try { return new URLSearchParams(window.location.search).get("reset"); } catch { return null; } });
-  const [page, setPage] = useState("home");
+  const [page, setPage] = useState(() => { try { const s = JSON.parse(localStorage.getItem("ftp_session")); return s ? (s.role === "admin" ? "dashboard" : "shop") : "home"; } catch { return "home"; } });
   const [products, setProducts] = useState(SEED_PRODUCTS);
   const [requests, setRequests] = useState([]);
   const [items, setItems] = useState([]);
@@ -1016,6 +1079,10 @@ export default function App() {
   const [camBusy, setCamBusy] = useState(false);
   const [camResult, setCamResult] = useState(null); // {typeId,label,confidence,note}
   const [camNonce, setCamNonce] = useState(0);
+  const [catSeed, setCatSeed] = useState({ cat: null, nonce: 0 }); // Home tile -> catalog category
+  const [bSeed, setBSeed] = useState({ type: null, nonce: 0 });    // Home tile -> builder type
+  const openCategory = (c) => { setCatSeed((s) => ({ cat: c, nonce: s.nonce + 1 })); setSelReq(null); setPage("catalog"); };
+  const openBuilder = (type) => { setBSeed((s) => ({ type, nonce: s.nonce + 1 })); setSelReq(null); setPage("builder"); };
 
   const role = session?.role || "contractor";
   const isAdmin = role === "admin";
@@ -1102,7 +1169,7 @@ export default function App() {
     setCamBusy(false);
   };
 
-  const login = (u) => { localStorage.setItem("ftp_session", JSON.stringify(u)); setSession(u); setGuest(false); setPage(u.role === "admin" ? "dashboard" : "catalog"); };
+  const login = (u) => { localStorage.setItem("ftp_session", JSON.stringify(u)); setSession(u); setGuest(false); setPage(u.role === "admin" ? "dashboard" : "shop"); };
   const logout = () => { localStorage.removeItem("ftp_session"); setSession(null); setCart([]); setSelReq(null); setPage("home"); };
 
   // ── cart ops ──
@@ -1264,9 +1331,10 @@ export default function App() {
 
   const nav = isAdmin
     ? [["dashboard", "Dashboard", IC.home], ["requests", "Requests", IC.list], ["customers", "Customers", IC.users]]
-    : [["catalog", "Parts Catalog", IC.box], ["builder", "Custom Flashing", IC.wrench], ["cart", "Cart / Send Request", IC.cart], ["requests", "My Requests", IC.list], ["parts", "My Saved Parts", IC.bookmark]];
+    : [["shop", "Home", IC.home], ["catalog", "Parts Catalog", IC.box], ["builder", "Custom Flashing", IC.wrench], ["cart", "Cart / Send Request", IC.cart], ["requests", "My Requests", IC.list], ["parts", "My Saved Parts", IC.bookmark]];
 
   const titles = {
+    shop: ["Welcome to Flash-Tech", "Pick a category — or jump straight into a custom builder"],
     dashboard: ["Dashboard", "Incoming quote & order requests at a glance"],
     requests: [isAdmin ? "Quote & Order Requests" : "My Requests", isAdmin ? "Click a request to review and respond" : "Track your quotes and orders"],
     customers: ["Customers", "Contractor accounts on the portal"],
@@ -1314,8 +1382,9 @@ export default function App() {
 
           {page === "dashboard" && isAdmin && <AdminDashboard requests={requests} msgs={msgs} contractorsById={contractorsById} onOpen={openRequest} />}
           {page === "customers" && isAdmin && <AdminCustomers contractors={contractors} requests={requests} onSave={saveContractor} onDelete={deleteContractor} />}
-          {page === "catalog" && !isAdmin && <CatalogPage products={products} onAdd={addProduct} disc={applyDisc} discPct={discPct} />}
-          {page === "builder" && !isAdmin && <BuilderPage guest={false} onAddToCart={addCustom} onSavePart={savePart} disc={applyDisc} discPct={discPct} detectInfo={camResult} detectNonce={camNonce} />}
+          {page === "shop" && !isAdmin && <ShopPage products={products} discPct={discPct} onPickCategory={openCategory} onBuilder={openBuilder} />}
+          {page === "catalog" && !isAdmin && <CatalogPage products={products} onAdd={addProduct} disc={applyDisc} discPct={discPct} seedCat={catSeed.cat} seedNonce={catSeed.nonce} />}
+          {page === "builder" && !isAdmin && <BuilderPage guest={false} onAddToCart={addCustom} onSavePart={savePart} disc={applyDisc} discPct={discPct} detectInfo={camResult} detectNonce={camNonce} seedType={bSeed.type} seedNonce={bSeed.nonce} />}
           {page === "cart" && !isAdmin && <CartPage cart={cart} onRemove={(k) => setCart((c) => c.filter((i) => i.key !== k))} onClear={() => setCart([])} onSubmit={submitRequest} busy={busy} user={session} />}
           {page === "parts" && !isAdmin && <MyPartsPage parts={parts} onAdd={addCustom} onDel={delPart} disc={applyDisc} discPct={discPct} />}
           {page === "requests" && (curReq ? (
