@@ -7,3 +7,11 @@ ReactDOM.createRoot(document.getElementById("root")).render(
     <App />
   </React.StrictMode>
 );
+
+// Register the service worker so the portal is installable ("Add to Home Screen")
+// and works offline. Production builds only — skips the Vite dev server so HMR isn't cached.
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => {});
+  });
+}
