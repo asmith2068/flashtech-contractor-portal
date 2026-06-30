@@ -425,7 +425,8 @@ function ShopPage({ products, onPickCategory, onBuilder, discPct = 0 }) {
   const tiles = [
     { key: "b-cone", label: "Custom Flashings", sub: "Boots, cones, wraps & scuppers — designed to size", img: coneImg, go: true, badge: "Builder", icon: IC.wrench, onClick: () => onBuilder("conicalBoot") },
     { key: "b-metal", label: "Metal Builder", sub: "Drip edge, coping, gravel stop & more", img: edgeImg, go: true, badge: "Builder", icon: IC.wrench, onClick: () => onBuilder("dripEdge") },
-    { key: "b-profile", label: "Profile Builder", sub: "Draw any custom bent profile by hand", img: edgeImg, go: true, badge: "Draw", icon: IC.wrench, onClick: () => onBuilder("customProfile") },
+    { key: "b-profile", label: "Profile Builder", sub: "Draw any custom bent profile by hand", svg: <ProfileTileArt />, go: true, badge: "Draw", icon: IC.wrench, onClick: () => onBuilder("customProfile") },
+    { key: "b-cap", label: "Sheet Metal Caps", sub: "4-sided box / pan caps to size", svg: <Pan3D p={{ length: 16, width: 11, height: 4, kick: 0, hem: "raw" }} height={140} showLabels={false} />, go: true, badge: "Builder", icon: IC.wrench, onClick: () => onBuilder("cap") },
     { key: "catalog", label: "Full Catalog", sub: "Browse every part & price", img: allImg, go: true, badge: "All Parts", icon: IC.box, onClick: () => onPickCategory("All") },
     { key: "c-" + PIPE, label: PIPE, sub: "Browse catalog", img: catImg(PIPE), onClick: () => onPickCategory(PIPE) },
     ...cats.filter((c) => c !== PIPE).map((c) => ({ key: "c-" + c, label: c, sub: "Browse catalog", img: catImg(c), onClick: () => onPickCategory(c) })),
@@ -439,7 +440,9 @@ function ShopPage({ products, onPickCategory, onBuilder, discPct = 0 }) {
           <button key={t.key} className={"tile" + (t.go ? " tile-go" : "")} onClick={t.onClick}>
             {t.badge && <span className="tile-badge">{t.icon}{t.badge}</span>}
             <div className="tile-img">
-              {t.img
+              {t.svg
+                ? t.svg
+                : t.img
                 ? <img src={t.img} alt="" loading="lazy" onError={(e) => { e.currentTarget.style.display = "none"; }} />
                 : <div className="tile-ph">{IC.box}</div>}
             </div>
@@ -663,8 +666,27 @@ function downloadDXF(filename, content) {
   } catch (e) { /* no-op */ }
 }
 
+// grid + bent-profile illustration for the Profile Builder home tile
+function ProfileTileArt() {
+  const g = [];
+  for (let x = 0; x <= 130; x += 13) g.push(<line key={"gx" + x} x1={x} y1="0" x2={x} y2="110" stroke="#e6ebf0" strokeWidth="1" />);
+  for (let y = 0; y <= 110; y += 13) g.push(<line key={"gy" + y} x1="0" y1={y} x2="130" y2={y} stroke="#e6ebf0" strokeWidth="1" />);
+  const pts = [[26, 34], [82, 34], [82, 74], [98, 86]]; // drip-edge-with-kick
+  return (
+    <svg viewBox="0 0 130 110" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" style={{ display: "block" }}>
+      <rect x="0" y="0" width="130" height="110" fill="#fff" />
+      {g}
+      <polyline points={pts.map((q) => q.join(",")).join(" ")} fill="none" stroke="#0DD714" strokeWidth="3.4" strokeLinejoin="round" strokeLinecap="round" />
+      {pts.map((q, i) => <circle key={i} cx={q[0]} cy={q[1]} r="3.4" fill="#0b0d0b" />)}
+      <text x="54" y="28" fontSize="11" fill="#0b0d0b" textAnchor="middle" fontWeight="700" style={{ fontFamily: "Oswald, sans-serif" }}>3″</text>
+      <text x="92" y="56" fontSize="11" fill="#0b0d0b" textAnchor="start" fontWeight="700" style={{ fontFamily: "Oswald, sans-serif" }}>3″</text>
+      <text x="86" y="50" fontSize="9" fill="#0aa810" textAnchor="start" fontWeight="700">90°</text>
+    </svg>
+  );
+}
+
 // ─── BOX / PAN CAP: axonometric 3D preview (closed top, 4 sides down) ───
-function Pan3D({ p, height = 300 }) {
+function Pan3D({ p, height = 300, showLabels = true }) {
   const L = Math.max(0.5, parseFloat(p.length) || 1), W = Math.max(0.5, parseFloat(p.width) || 1), H = Math.max(0.5, parseFloat(p.height) || 1);
   const d = 0.5; // depth foreshortening
   const proj = (x, y, z) => [x + y * d, -y * d + z]; // x right, y depth (up-right), z down
@@ -682,9 +704,11 @@ function Pan3D({ p, height = 300 }) {
       <polygon points={poly([B, C, Cf, Bf])} fill="#8f98a1" stroke="#5b636b" strokeWidth={lw} />
       <polygon points={poly([A, B, Bf, Af])} fill="#aab2bb" stroke="#5b636b" strokeWidth={lw} />
       <polygon points={poly([A, B, C, D])} fill="#cdd4db" stroke="#5b636b" strokeWidth={lw} />
-      <text x={mid(A, B)[0]} y={mid(A, B)[1] - fs * 0.4} fontSize={fs} fill="#0b0d0b" textAnchor="middle" fontWeight="700" style={{ fontFamily: "Oswald, sans-serif" }}>{L}"</text>
-      <text x={mid(B, C)[0] + fs * 0.4} y={mid(B, C)[1]} fontSize={fs} fill="#0b0d0b" textAnchor="start" fontWeight="700" style={{ fontFamily: "Oswald, sans-serif" }}>{W}"</text>
-      <text x={mid(B, Bf)[0] + fs * 0.4} y={mid(B, Bf)[1]} fontSize={fs} fill="#0b0d0b" textAnchor="start" fontWeight="700" style={{ fontFamily: "Oswald, sans-serif" }}>{H}"</text>
+      {showLabels && <>
+        <text x={mid(A, B)[0]} y={mid(A, B)[1] - fs * 0.4} fontSize={fs} fill="#0b0d0b" textAnchor="middle" fontWeight="700" style={{ fontFamily: "Oswald, sans-serif" }}>{L}"</text>
+        <text x={mid(B, C)[0] + fs * 0.4} y={mid(B, C)[1]} fontSize={fs} fill="#0b0d0b" textAnchor="start" fontWeight="700" style={{ fontFamily: "Oswald, sans-serif" }}>{W}"</text>
+        <text x={mid(B, Bf)[0] + fs * 0.4} y={mid(B, Bf)[1]} fontSize={fs} fill="#0b0d0b" textAnchor="start" fontWeight="700" style={{ fontFamily: "Oswald, sans-serif" }}>{H}"</text>
+      </>}
     </svg>
   );
 }

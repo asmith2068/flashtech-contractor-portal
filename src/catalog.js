@@ -231,8 +231,9 @@ export const MATERIALS = [
   { code: "B24", name: "Bonderized 24ga", rate: 0.34, hue: 35, sat: 7, lum: 44 },
   { code: "A32", name: 'Aluminum .032"', rate: 0.36, hue: 215, sat: 4, lum: 72 },
   { code: "A40", name: 'Aluminum .040"', rate: 0.46, hue: 215, sat: 4, lum: 70 },
-  { code: "CU16", name: "Copper 16oz", rate: 1.45, hue: 22, sat: 60, lum: 48 },
-  { code: "SS24", name: "Stainless 24ga", rate: 0.95, hue: 210, sat: 6, lum: 74 },
+  // Bare-metal rates anchored to Galv 24ga sheet cost ($40 / 120×48): stainless = 2.5× ($100), copper = 8.75× ($350).
+  { code: "CU16", name: "Copper 16oz", rate: 2.80, hue: 22, sat: 60, lum: 48 },
+  { code: "SS24", name: "Stainless 24ga", rate: 0.80, hue: 210, sat: 6, lum: 74 },
 ];
 
 // ─── Single-ply membrane: type (TPO / PVC), color, thickness ───
