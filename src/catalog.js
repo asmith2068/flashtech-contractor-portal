@@ -409,15 +409,14 @@ export const FLASHING_TYPES = [
       { key: "length", label: "Length — L (in)", def: 12, min: 2, max: 120 },
       { key: "width", label: "Width — W (in)", def: 24, min: 2, max: 120 },
       { key: "height", label: "Side Height — H (in)", def: 3, min: 0.5, max: 16, step: 0.25 },
-      { key: "kick", label: "Kick-Out (in)", def: 0.5, min: 0, max: 2, step: 0.25 },
-      { key: "kickAngle", label: "Kick Angle (°)", def: 35, min: 0, max: 75, step: 5 },
+      { key: "angle", label: "Side Angle — out (°)", def: 0, min: 0, max: 60, step: 5 },
       { key: "hem", label: "Bottom Edge", type: "choice", def: "hem", options: [
         { value: "hem", label: 'Hemmed edge (½")' },
         { value: "raw", label: "Raw edge" },
       ] },
     ],
-    dims: (p) => `${p.length}"L × ${p.width}"W × ${p.height}"H box cap` +
-      (p.kick > 0 ? `, ${p.kick}" kick @ ${p.kickAngle}°` : "") +
+    dims: (p) => `${p.length}"L × ${p.width}"W × ${p.height}"H box cap, ½" kick` +
+      (p.angle > 0 ? `, sides out ${p.angle}°` : "") +
       (p.hem === "hem" ? ', ½" hemmed edge' : "") + ", hemmed-tab corners",
   },
   {
@@ -576,13 +575,14 @@ export const customDescription = (typeId, matCode, params, lengthFt, girth) => {
 };
 
 // ─── Box / Pan cap — 4-sided box, priced EACH ───
-// Side stretch-out S = vertical height + kick + hem; flat blank = (L+2S)(W+2S).
-export const panSide = (p) => (parseFloat(p.height) || 0) + (parseFloat(p.kick) || 0) + (p.hem === "hem" ? 0.5 : 0);
+// Side stretch-out S = side height + fixed ½" kick + hem (the splay angle is a brake setting, not extra metal).
+const PAN_KICK = 0.5; // every cap has a ½" kick at the bottom of the sides
+export const panSide = (p) => (parseFloat(p.height) || 0) + PAN_KICK + (p.hem === "hem" ? 0.5 : 0);
 export const panBlank = (p) => {
   const L = parseFloat(p.length) || 0, W = parseFloat(p.width) || 0, S = panSide(p);
   return { l: Math.round((L + 2 * S) * 100) / 100, w: Math.round((W + 2 * S) * 100) / 100, s: Math.round(S * 100) / 100 };
 };
-// Calibrated to Flash-Tech list pricing (galvanized): 36×48×3" (½" kick+hem) = $175, 12×24×3" = $105.
+// Calibrated to Flash-Tech list pricing (galvanized): 36×48×3" (½" kick + ½" hem) = $175, 12×24×3" = $105.
 // price = (PAN_BASE + PAN_AREA × flatBlankArea), scaled by material vs. galvanized 26ga.
 const PAN_BASE = 80.44;
 const PAN_AREA = 0.038377; // $ per sq-in of flat blank
@@ -597,7 +597,8 @@ export const panPartNumber = (matCode, p) =>
   `FT-CX-CAP-${matCode}-${Math.round(parseFloat(p.length) || 0)}x${Math.round(parseFloat(p.width) || 0)}x${Math.round(parseFloat(p.height) || 0)}`;
 export const panDescription = (matCode, p) => {
   const m = matByCode(matCode);
-  return `Custom Box / Pan Cap — ${m.name}, ${p.length}"L × ${p.width}"W × ${p.height}"H, hemmed-tab corners${p.hem === "hem" ? ', ½" hemmed edge' : ""}`;
+  return `Custom Box / Pan Cap — ${m.name}, ${p.length}"L × ${p.width}"W × ${p.height}"H, ½" kick` +
+    (p.angle > 0 ? `, sides out ${p.angle}°` : "") + `, hemmed-tab corners${p.hem === "hem" ? ', ½" hemmed edge' : ""}`;
 };
 
 // ─── DXF export (R12 ASCII, inches) — for the Roper Whitney / brake software ───
@@ -614,8 +615,8 @@ export const profileDXF = (points) => {
 // Box/pan flat blank: cross/plus outline (CUT) with hemmed corner tabs + all fold lines (BEND).
 export const panFlatDXF = (p) => {
   const L = Math.max(0.1, parseFloat(p.length) || 0), W = Math.max(0.1, parseFloat(p.width) || 0);
-  const H = Math.max(0.1, parseFloat(p.height) || 0), kick = Math.max(0, parseFloat(p.kick) || 0), hem = p.hem === "hem" ? 0.5 : 0;
-  const a = H + kick + hem, t = 0.625; // a = full side stretch-out, t = hemmed corner tab
+  const H = Math.max(0.1, parseFloat(p.height) || 0), kick = 0.5, hem = p.hem === "hem" ? 0.5 : 0;
+  const a = H + kick + hem, t = 0.625; // a = side stretch-out (height + kick + hem), t = hemmed corner tab
   const V = [
     [a, 0], [a + L, 0], [a + L, a - t], [2 * a + L, a - t], [2 * a + L, a + W + t], [a + L, a + W + t],
     [a + L, 2 * a + W], [a, 2 * a + W], [a, a + W + t], [0, a + W + t], [0, a - t], [a, a - t],
@@ -624,10 +625,10 @@ export const panFlatDXF = (p) => {
   for (let i = 0; i < V.length; i++) { const j = (i + 1) % V.length; s += dxfLine(V[i][0], V[i][1], V[j][0], V[j][1], "CUT"); }
   const foldH = (y) => dxfLine(a, y, a + L, y, "BEND");   // across bottom/top flaps
   const foldV = (x) => dxfLine(x, a, x, a + W, "BEND");   // across left/right flaps
-  // main panel folds (top rim of each side)
+  // main panel folds (top rim — bent to 90°−side angle on the brake)
   s += foldH(a) + foldH(a + W) + foldV(a) + foldV(a + L);
-  // kick folds (bottom of the vertical side)
-  if (kick > 0) s += foldH(a - H) + foldH(a + W + H) + foldV(a - H) + foldV(a + L + H);
+  // kick folds (½" out-turn at the bottom of each side)
+  s += foldH(a - H) + foldH(a + W + H) + foldV(a - H) + foldV(a + L + H);
   // hem folds (the turned ½" edge)
   if (hem > 0) s += foldH(a - H - kick) + foldH(a + W + H + kick) + foldV(a - H - kick) + foldV(a + L + H + kick);
   return s + dxfFooter();

@@ -426,7 +426,7 @@ function ShopPage({ products, onPickCategory, onBuilder, discPct = 0 }) {
     { key: "b-cone", label: "Custom Flashings", sub: "Boots, cones, wraps & scuppers — designed to size", img: coneImg, go: true, badge: "Builder", icon: IC.wrench, onClick: () => onBuilder("conicalBoot") },
     { key: "b-metal", label: "Metal Builder", sub: "Drip edge, coping, gravel stop & more", img: edgeImg, go: true, badge: "Builder", icon: IC.wrench, onClick: () => onBuilder("dripEdge") },
     { key: "b-profile", label: "Profile Builder", sub: "Draw any custom bent profile by hand", svg: <ProfileTileArt />, go: true, badge: "Draw", icon: IC.wrench, onClick: () => onBuilder("customProfile") },
-    { key: "b-cap", label: "Sheet Metal Caps", sub: "4-sided box / pan caps to size", svg: <Pan3D p={{ length: 16, width: 11, height: 4, kick: 0, hem: "raw" }} height={140} showLabels={false} />, go: true, badge: "Builder", icon: IC.wrench, onClick: () => onBuilder("cap") },
+    { key: "b-cap", label: "Sheet Metal Caps", sub: "4-sided box / pan caps to size", svg: <Pan3D p={{ length: 16, width: 11, height: 4, angle: 14, hem: "raw" }} height={140} showLabels={false} />, go: true, badge: "Builder", icon: IC.wrench, onClick: () => onBuilder("cap") },
     { key: "catalog", label: "Full Catalog", sub: "Browse every part & price", img: allImg, go: true, badge: "All Parts", icon: IC.box, onClick: () => onPickCategory("All") },
     { key: "c-" + PIPE, label: PIPE, sub: "Browse catalog", img: catImg(PIPE), onClick: () => onPickCategory(PIPE) },
     ...cats.filter((c) => c !== PIPE).map((c) => ({ key: "c-" + c, label: c, sub: "Browse catalog", img: catImg(c), onClick: () => onPickCategory(c) })),
@@ -688,11 +688,15 @@ function ProfileTileArt() {
 // ─── BOX / PAN CAP: axonometric 3D preview (closed top, 4 sides down) ───
 function Pan3D({ p, height = 300, showLabels = true }) {
   const L = Math.max(0.5, parseFloat(p.length) || 1), W = Math.max(0.5, parseFloat(p.width) || 1), H = Math.max(0.5, parseFloat(p.height) || 1);
+  const ang = (parseFloat(p.angle) || 0) * Math.PI / 180;          // sides splay out from vertical
+  const f = H * Math.sin(ang), v = H * Math.cos(ang);              // horizontal flare, vertical drop
+  const K = 0.5;                                                   // fixed ½" kick (horizontal out-turn)
   const d = 0.5; // depth foreshortening
   const proj = (x, y, z) => [x + y * d, -y * d + z]; // x right, y depth (up-right), z down
   const A = proj(0, 0, 0), B = proj(L, 0, 0), C = proj(L, W, 0), D = proj(0, W, 0);   // top rim
-  const Af = proj(0, 0, H), Bf = proj(L, 0, H), Cf = proj(L, W, H);                    // skirt bottoms
-  const all = [A, B, C, D, Af, Bf, Cf];
+  const Af = proj(-f, -f, v), Bf = proj(L + f, -f, v), Cf = proj(L + f, W + f, v);    // flared side bottoms
+  const Ak = proj(-f - K, -f - K, v), Bk = proj(L + f + K, -f - K, v), Ck = proj(L + f + K, W + f + K, v); // kick lip
+  const all = [A, B, C, D, Af, Bf, Cf, Ak, Bk, Ck];
   const xs = all.map((q) => q[0]), ys = all.map((q) => q[1]);
   const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
   const w = maxX - minX, h = maxY - minY, pad = Math.max(w, h) * 0.12 + 0.5;
@@ -703,6 +707,8 @@ function Pan3D({ p, height = 300, showLabels = true }) {
     <svg viewBox={`${minX - pad} ${minY - pad} ${w + pad * 2} ${h + pad * 2}`} width="100%" height={height} style={{ display: "block" }}>
       <polygon points={poly([B, C, Cf, Bf])} fill="#8f98a1" stroke="#5b636b" strokeWidth={lw} />
       <polygon points={poly([A, B, Bf, Af])} fill="#aab2bb" stroke="#5b636b" strokeWidth={lw} />
+      <polygon points={poly([Bf, Cf, Ck, Bk])} fill="#9aa3ac" stroke="#5b636b" strokeWidth={lw} />
+      <polygon points={poly([Af, Bf, Bk, Ak])} fill="#b8c0c8" stroke="#5b636b" strokeWidth={lw} />
       <polygon points={poly([A, B, C, D])} fill="#cdd4db" stroke="#5b636b" strokeWidth={lw} />
       {showLabels && <>
         <text x={mid(A, B)[0]} y={mid(A, B)[1] - fs * 0.4} fontSize={fs} fill="#0b0d0b" textAnchor="middle" fontWeight="700" style={{ fontFamily: "Oswald, sans-serif" }}>{L}"</text>
