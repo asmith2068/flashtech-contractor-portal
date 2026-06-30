@@ -402,47 +402,18 @@ export const FLASHING_TYPES = [
   {
     id: "cap",
     code: "CAP",
-    name: "Sheet Metal Cap",
+    name: "Box / Pan Cap",
+    pan: true, // 4-sided box cap: closed top L×W, sides fold DOWN by H with hemmed-tab corners. Priced EACH.
     fields: [
-      { key: "width", label: "Cap Width — W (in)", def: 8, min: 2, max: 30 },
-      { key: "height", label: "Side Height — H (in)", def: 3, min: 0.5, max: 14, step: 0.25 },
-      { key: "kick", label: "Kick-Out (in)", def: 0.75, min: 0.25, max: 2, step: 0.25 },
-      { key: "kickAngle", label: "Kick Angle (°)", def: 45, min: 15, max: 75, step: 5 },
-      { key: "edge", label: "Bottom Edge", type: "choice", def: "plain", options: [
-        { value: "plain", label: "Plain — no kick, no hem" },
-        { value: "kick", label: "Kick only" },
-        { value: "hem", label: "Hem only" },
-        { value: "hemkick", label: "Hem + Kick" },
+      { key: "length", label: "Length — L (in)", def: 12, min: 2, max: 60 },
+      { key: "width", label: "Width — W (in)", def: 12, min: 2, max: 60 },
+      { key: "height", label: "Side Height — H (in)", def: 3, min: 0.5, max: 16, step: 0.25 },
+      { key: "hem", label: "Bottom Edge", type: "choice", def: "hem", options: [
+        { value: "hem", label: 'Hemmed edge (½")' },
+        { value: "raw", label: "Raw edge" },
       ] },
     ],
-    // Cap = flat top of width W with a leg of height H down each side; optional kick-out + hemmed edge.
-    // Length (L) is the piece length set below; girth = W + 2·H (+ kick/hem allowances).
-    points: (p) => {
-      const W = p.width, H = p.height;
-      const ka = rad(p.kickAngle ?? 45), kick = p.kick ?? 0;
-      const useKick = (p.edge === "kick" || p.edge === "hemkick") && kick > 0;
-      const useHem = (p.edge === "hem" || p.edge === "hemkick");
-      const hl = 0.5; // hemmed return length
-      const pts = [];
-      // left leg (bottom -> top), kick flares out to -x
-      const lTip = useKick ? [-Math.sin(ka) * kick, H + Math.cos(ka) * kick] : [0, H];
-      if (useHem) pts.push([lTip[0] + hl, lTip[1]]);
-      pts.push(lTip);
-      if (useKick) pts.push([0, H]);
-      pts.push([0, 0]);
-      // across the top
-      pts.push([W, 0]);
-      // right leg (top -> bottom), kick flares out to +x
-      pts.push([W, H]);
-      const rTip = useKick ? [W + Math.sin(ka) * kick, H + Math.cos(ka) * kick] : [W, H];
-      if (useKick) pts.push(rTip);
-      if (useHem) pts.push([rTip[0] - hl, rTip[1]]);
-      return pts;
-    },
-    dims: (p) => `${p.width}"W × ${p.height}"H cap` +
-      (p.edge === "plain" ? "" : p.edge === "hem" ? ", hemmed edge"
-        : p.edge === "kick" ? `, ${p.kick}" kick @ ${p.kickAngle}°`
-        : `, ${p.kick}" kick @ ${p.kickAngle}° + hem`),
+    dims: (p) => `${p.length}"L × ${p.width}"W × ${p.height}"H box cap, hemmed-tab corners${p.hem === "hem" ? ", hemmed edge" : ""}`,
   },
   {
     id: "customProfile",
@@ -597,6 +568,63 @@ export const customDescription = (typeId, matCode, params, lengthFt, girth) => {
   const m = matByCode(matCode);
   const girthLabel = t.custom ? `${girth}" stretch-out` : `${girth}" girth`;
   return `${t.custom ? "" : "Custom "}${t.name} — ${m.name}, ${t.dims(params)}, ${girthLabel}, ${lengthFt}'-0" lengths`;
+};
+
+// ─── Box / Pan cap — 4-sided box, priced EACH by flat-blank area + fab ───
+const PAN_CORNER = 1.75;   // $ per hemmed-tab corner
+const PAN_HEM_RATE = 0.02; // $ per inch of hemmed edge
+export const panBlank = (p) => {
+  const L = parseFloat(p.length) || 0, W = parseFloat(p.width) || 0, H = parseFloat(p.height) || 0;
+  return { l: Math.round((L + 2 * H) * 100) / 100, w: Math.round((W + 2 * H) * 100) / 100 };
+};
+export const panPrice = (p, matCode) => {
+  const m = matByCode(matCode);
+  const L = parseFloat(p.length) || 0, W = parseFloat(p.width) || 0, H = parseFloat(p.height) || 0;
+  const areaSqFt = ((L + 2 * H) * (W + 2 * H)) / 144;
+  const hem = p.hem === "hem" ? 2 * (L + W) * PAN_HEM_RATE : 0;
+  const raw = areaSqFt * (m.rate * 12) + 4 * BEND_CHARGE + 4 * PAN_CORNER + hem;
+  return Math.round(Math.max(MIN_PIECE, raw) * 100) / 100;
+};
+export const panPartNumber = (matCode, p) =>
+  `FT-CX-CAP-${matCode}-${Math.round(parseFloat(p.length) || 0)}x${Math.round(parseFloat(p.width) || 0)}x${Math.round(parseFloat(p.height) || 0)}`;
+export const panDescription = (matCode, p) => {
+  const m = matByCode(matCode);
+  return `Custom Box / Pan Cap — ${m.name}, ${p.length}"L × ${p.width}"W × ${p.height}"H, hemmed-tab corners${p.hem === "hem" ? ', ½" hemmed edge' : ""}`;
+};
+
+// ─── DXF export (R12 ASCII, inches) — for the Roper Whitney / brake software ───
+const r4 = (n) => Math.round(n * 10000) / 10000;
+const dxfHeader = () => `0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1009\n9\n$INSUNITS\n70\n1\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n`;
+const dxfFooter = () => `0\nENDSEC\n0\nEOF\n`;
+const dxfLine = (x1, y1, x2, y2, layer) => `0\nLINE\n8\n${layer}\n10\n${r4(x1)}\n20\n${r4(y1)}\n30\n0\n11\n${r4(x2)}\n21\n${r4(y2)}\n31\n0\n`;
+// Linear profile cross-section -> connected LINE entities (y flipped to CAD up).
+export const profileDXF = (points) => {
+  let s = dxfHeader();
+  for (let i = 1; i < points.length; i++) s += dxfLine(points[i - 1][0], -points[i - 1][1], points[i][0], -points[i][1], "PROFILE");
+  return s + dxfFooter();
+};
+// Box/pan flat blank: cross/plus outline (CUT) with hemmed corner tabs + fold lines (BEND).
+export const panFlatDXF = (p) => {
+  const L = Math.max(0.1, parseFloat(p.length) || 0), W = Math.max(0.1, parseFloat(p.width) || 0), H = Math.max(0.1, parseFloat(p.height) || 0);
+  const a = H, t = Math.min(H * 0.6, 0.75); // a = side depth, t = hemmed corner tab
+  const V = [
+    [a, 0], [a + L, 0], [a + L, a - t], [2 * a + L, a - t], [2 * a + L, a + W + t], [a + L, a + W + t],
+    [a + L, 2 * a + W], [a, 2 * a + W], [a, a + W + t], [0, a + W + t], [0, a - t], [a, a - t],
+  ];
+  let s = dxfHeader();
+  for (let i = 0; i < V.length; i++) { const j = (i + 1) % V.length; s += dxfLine(V[i][0], V[i][1], V[j][0], V[j][1], "CUT"); }
+  s += dxfLine(a, a, a + L, a, "BEND");
+  s += dxfLine(a, a + W, a + L, a + W, "BEND");
+  s += dxfLine(a, a, a, a + W, "BEND");
+  s += dxfLine(a + L, a, a + L, a + W, "BEND");
+  return s + dxfFooter();
+};
+// Pick the right DXF for a saved sheet-metal part (pan flat blank vs linear profile).
+export const partDXF = (flashingType, params) => {
+  const t = typeById(flashingType);
+  if (t.pan) return panFlatDXF(params);
+  if ((t.kind || "sheet") === "sheet") return profileDXF(t.custom ? customProfilePoints(params.segs || []) : t.points(params));
+  return null;
 };
 
 // ─── Single-ply membrane pricing ───

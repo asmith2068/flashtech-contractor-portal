@@ -7,7 +7,7 @@ import {
   profileGirth, profileBends, piecePrice, customPartNumber, customDescription, defaultParams,
   membranePrice, membranePartNumber, membraneDescription,
   scupperPrice, scupperPartNumber, scupperSides, scupperTier, productImage, POPULAR_SKUS,
-  customProfilePoints,
+  customProfilePoints, panPrice, panPartNumber, panDescription, panBlank, partDXF,
 } from "./catalog.js";
 
 // ─── UTILITIES ───────────────────────────────────────────────
@@ -239,6 +239,8 @@ tr.click:hover { background:#f0fdf4; cursor:pointer; }
 .profrow .segf { flex:1; }
 .profrow .segf label { font-size:10px; margin-bottom:2px; }
 .profrow .segf input { padding:6px 8px; }
+.zoomctl { display:inline-flex; gap:4px; }
+.zoomctl .btn { font-size:16px; line-height:1; padding:4px 10px; }
 .spec b { display:block; font-size:15px; } .spec span { font-size:11px; color:var(--mut); text-transform:uppercase; font-weight:600; }
 /* LOGIN */
 .login { min-height:100vh; display:flex; align-items:center; justify-content:center; background:linear-gradient(160deg,#000 0%,#0a140a 65%,#11320f 130%); padding:18px; }
@@ -423,6 +425,7 @@ function ShopPage({ products, onPickCategory, onBuilder, discPct = 0 }) {
   const tiles = [
     { key: "b-cone", label: "Custom Flashings", sub: "Boots, cones, wraps & scuppers — designed to size", img: coneImg, go: true, badge: "Builder", icon: IC.wrench, onClick: () => onBuilder("conicalBoot") },
     { key: "b-metal", label: "Metal Builder", sub: "Drip edge, coping, gravel stop & more", img: edgeImg, go: true, badge: "Builder", icon: IC.wrench, onClick: () => onBuilder("dripEdge") },
+    { key: "b-profile", label: "Profile Builder", sub: "Draw any custom bent profile by hand", img: edgeImg, go: true, badge: "Draw", icon: IC.wrench, onClick: () => onBuilder("customProfile") },
     { key: "catalog", label: "Full Catalog", sub: "Browse every part & price", img: allImg, go: true, badge: "All Parts", icon: IC.box, onClick: () => onPickCategory("All") },
     { key: "c-" + PIPE, label: PIPE, sub: "Browse catalog", img: catImg(PIPE), onClick: () => onPickCategory(PIPE) },
     ...cats.filter((c) => c !== PIPE).map((c) => ({ key: "c-" + c, label: c, sub: "Browse catalog", img: catImg(c), onClick: () => onPickCategory(c) })),
@@ -548,7 +551,7 @@ const fmtIn = (v) => {                                     // 3.0625 -> 3 1/16"
 };
 
 // ─── CUSTOM PROFILE: drawable 2D cross-section (mouse / touch) ───
-function ProfileCanvas({ segs, onChange, drawMode = false, onFinish = () => {}, color = "#0DD714", height = 300 }) {
+function ProfileCanvas({ segs, onChange, drawMode = false, onFinish = () => {}, span = 10, color = "#0DD714", height = 300 }) {
   const svgRef = useRef(null);
   const [start, setStart] = useState(null);   // inch-space anchor of the first vertex
   const [cursor, setCursor] = useState(null); // inch-space cursor while drawing
@@ -586,11 +589,15 @@ function ProfileCanvas({ segs, onChange, drawMode = false, onFinish = () => {}, 
   // viewBox: fixed inch grid while drawing, auto-fit when static
   let vb, grid = null, scale;
   if (drawMode) {
-    const GX0 = -2, GY0 = -9, GW = 18, GH = 18; scale = 18;
-    vb = `${GX0} ${GY0} ${GW} ${GH}`;
+    const S = Math.max(4, span || 10); scale = S;
+    const GX0 = -2, GY0 = -S / 2;
+    vb = `${GX0} ${GY0} ${S} ${S}`;
+    const minor = S <= 8 ? 0.5 : 1; // finer grid when zoomed in
     const g = [];
-    for (let x = GX0; x <= GX0 + GW; x++) g.push(<line key={"gx" + x} x1={x} y1={GY0} x2={x} y2={GY0 + GH} stroke={x === 0 ? "#cbd5e1" : "#e8edf2"} strokeWidth="0.03" />);
-    for (let y = GY0; y <= GY0 + GH; y++) g.push(<line key={"gy" + y} x1={GX0} y1={y} x2={GX0 + GW} y2={y} stroke={y === 0 ? "#cbd5e1" : "#e8edf2"} strokeWidth="0.03" />);
+    const col = (v) => Math.abs(v) < 1e-6 ? "#bcc4cd" : (Math.abs(v % 1) < 1e-6 ? "#dde3ea" : "#eef2f6");
+    const sw = (v) => Math.abs(v) < 1e-6 ? S * 0.0022 : S * 0.0014;
+    for (let x = Math.ceil(GX0 / minor) * minor; x <= GX0 + S + 1e-6; x += minor) g.push(<line key={"gx" + x.toFixed(2)} x1={x} y1={GY0} x2={x} y2={GY0 + S} stroke={col(x)} strokeWidth={sw(x)} />);
+    for (let y = Math.ceil(GY0 / minor) * minor; y <= GY0 + S + 1e-6; y += minor) g.push(<line key={"gy" + y.toFixed(2)} x1={GX0} y1={y} x2={GX0 + S} y2={y} stroke={col(y)} strokeWidth={sw(y)} />);
     grid = g;
   } else {
     const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
@@ -644,6 +651,44 @@ function ProfileCanvas({ segs, onChange, drawMode = false, onFinish = () => {}, 
   );
 }
 
+// trigger a .dxf download in the browser
+function downloadDXF(filename, content) {
+  try {
+    const blob = new Blob([content], { type: "application/dxf" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename.replace(/[^\w.-]+/g, "_");
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (e) { /* no-op */ }
+}
+
+// ─── BOX / PAN CAP: axonometric 3D preview (closed top, 4 sides down) ───
+function Pan3D({ p, height = 300 }) {
+  const L = Math.max(0.5, parseFloat(p.length) || 1), W = Math.max(0.5, parseFloat(p.width) || 1), H = Math.max(0.5, parseFloat(p.height) || 1);
+  const d = 0.5; // depth foreshortening
+  const proj = (x, y, z) => [x + y * d, -y * d + z]; // x right, y depth (up-right), z down
+  const A = proj(0, 0, 0), B = proj(L, 0, 0), C = proj(L, W, 0), D = proj(0, W, 0);   // top rim
+  const Af = proj(0, 0, H), Bf = proj(L, 0, H), Cf = proj(L, W, H);                    // skirt bottoms
+  const all = [A, B, C, D, Af, Bf, Cf];
+  const xs = all.map((q) => q[0]), ys = all.map((q) => q[1]);
+  const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+  const w = maxX - minX, h = maxY - minY, pad = Math.max(w, h) * 0.12 + 0.5;
+  const fs = Math.max(w, h) * 0.06, lw = Math.max(w, h) * 0.006;
+  const poly = (pts) => pts.map((q) => `${q[0]},${q[1]}`).join(" ");
+  const mid = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+  return (
+    <svg viewBox={`${minX - pad} ${minY - pad} ${w + pad * 2} ${h + pad * 2}`} width="100%" height={height} style={{ display: "block" }}>
+      <polygon points={poly([B, C, Cf, Bf])} fill="#8f98a1" stroke="#5b636b" strokeWidth={lw} />
+      <polygon points={poly([A, B, Bf, Af])} fill="#aab2bb" stroke="#5b636b" strokeWidth={lw} />
+      <polygon points={poly([A, B, C, D])} fill="#cdd4db" stroke="#5b636b" strokeWidth={lw} />
+      <text x={mid(A, B)[0]} y={mid(A, B)[1] - fs * 0.4} fontSize={fs} fill="#0b0d0b" textAnchor="middle" fontWeight="700" style={{ fontFamily: "Oswald, sans-serif" }}>{L}"</text>
+      <text x={mid(B, C)[0] + fs * 0.4} y={mid(B, C)[1]} fontSize={fs} fill="#0b0d0b" textAnchor="start" fontWeight="700" style={{ fontFamily: "Oswald, sans-serif" }}>{W}"</text>
+      <text x={mid(B, Bf)[0] + fs * 0.4} y={mid(B, Bf)[1]} fontSize={fs} fill="#0b0d0b" textAnchor="start" fontWeight="700" style={{ fontFamily: "Oswald, sans-serif" }}>{H}"</text>
+    </svg>
+  );
+}
+
 // ─── CUSTOM FLASHING BUILDER ─────────────────────────────────
 function BuilderPage({ guest, onAddToCart, onSavePart, disc = (x) => x, discPct = 0, detectInfo = null, detectNonce = 0, seedType = null, seedNonce = 0 }) {
   const [typeId, setTypeId] = useState("dripEdge");
@@ -654,6 +699,7 @@ function BuilderPage({ guest, onAddToCart, onSavePart, disc = (x) => x, discPct 
   const [name, setName] = useState("");
   const [saved, setSaved] = useState("");
   const [drawMode, setDrawMode] = useState(false);
+  const [drawSpan, setDrawSpan] = useState(10); // canvas size in inches (zoom); smaller = easier small segments
 
   const t = typeById(typeId);
   const isSheet = (t.kind || "sheet") === "sheet";
@@ -661,6 +707,7 @@ function BuilderPage({ guest, onAddToCart, onSavePart, disc = (x) => x, discPct 
   // Valid/sanitized params for all math & saving — lets the inputs hold blank/partial
   // values mid-edit (so you can clear and retype) without breaking the live preview.
   const isCustom = isSheet && !!t.custom;
+  const isPan = isSheet && !!t.pan;
   const vp = useMemo(() => {
     const o = { ...params };
     for (const f of t.fields) {
@@ -675,24 +722,28 @@ function BuilderPage({ guest, onAddToCart, onSavePart, disc = (x) => x, discPct 
     return o;
   }, [t, params]);
 
-  // sheet-metal path. Custom drawn profiles are always priced as a 10' piece.
+  // sheet-metal path. Custom drawn profiles are always priced as a 10' piece. Box/pan caps are priced each.
   const effLen = isCustom ? 10 : lenFt;
-  const pts = useMemo(() => (isSheet ? t.points(vp) : []), [isSheet, t, vp]);
-  const girth = isSheet ? profileGirth(pts) : 0;
-  const bends = isSheet ? profileBends(pts) : 0;
+  const pts = useMemo(() => (isSheet && !isPan ? t.points(vp) : []), [isSheet, isPan, t, vp]);
+  const girth = (isSheet && !isPan) ? profileGirth(pts) : 0;
+  const bends = (isSheet && !isPan) ? profileBends(pts) : 0;
   // single-ply membrane path
   const geo = useMemo(() => (isSheet ? null : t.geometry(vp)), [isSheet, t, vp]);
   const split = !!vp.split;
   const isScupper = !isSheet && geo && geo.shape === "scupper";
 
-  const perPiece = isSheet ? piecePrice(girth, bends, effLen, matCode)
+  const perPiece = isPan ? panPrice(vp, matCode)
+    : isSheet ? piecePrice(girth, bends, effLen, matCode)
     : isScupper ? scupperPrice(geo, matCode)
     : membranePrice(geo, matCode, split, vp.mil);
-  const perLF = isSheet ? Math.round((perPiece / effLen) * 100) / 100 : null;
-  const partNo = isSheet ? customPartNumber(typeId, matCode, girth)
+  const perLF = (isSheet && !isPan) ? Math.round((perPiece / effLen) * 100) / 100 : null;
+  const partNo = isPan ? panPartNumber(matCode, vp)
+    : isSheet ? customPartNumber(typeId, matCode, girth)
     : isScupper ? scupperPartNumber(matCode, geo)
     : membranePartNumber(typeId, matCode, geo, split);
-  const desc = isSheet ? customDescription(typeId, matCode, vp, effLen, girth) : membraneDescription(typeId, matCode, vp, split);
+  const desc = isPan ? panDescription(matCode, vp)
+    : isSheet ? customDescription(typeId, matCode, vp, effLen, girth)
+    : membraneDescription(typeId, matCode, vp, split);
   const total = Math.round(perPiece * pieces * 100) / 100;
 
   const pickType = (id) => {
@@ -704,12 +755,17 @@ function BuilderPage({ guest, onAddToCart, onSavePart, disc = (x) => x, discPct 
     if (detectNonce && detectInfo?.typeId && typeById(detectInfo.typeId)) { pickType(detectInfo.typeId); setSaved(""); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detectNonce]);
-  // when arriving from a Home tile (Custom Flashings / Metal Builder)
+  // when arriving from a Home tile (Custom Flashings / Metal Builder / Profile Builder)
   useEffect(() => {
-    if (seedNonce && seedType && typeById(seedType)) { pickType(seedType); setSaved(""); }
+    if (seedNonce && seedType && typeById(seedType)) {
+      pickType(seedType); setSaved("");
+      if (seedType === "customProfile") { setParams((pp) => ({ ...pp, segs: [] })); setDrawMode(true); }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seedNonce]);
-  const custom = isSheet
+  const custom = isPan
+    ? { part_number: partNo, name: name || `${t.name} ${vp.length}×${vp.width}×${vp.height}`, flashing_type: typeId, material_code: matCode, params: vp, girth: null, bends: null, piece_length_ft: null, price_per_piece: perPiece, description: desc }
+    : isSheet
     ? { part_number: partNo, name: name || `${t.name} ${girth}"`, flashing_type: typeId, material_code: matCode, params: vp, girth, bends, piece_length_ft: effLen, price_per_piece: perPiece, description: desc }
     : { part_number: partNo, name: name || `${split ? "Split " : ""}${t.name}`, flashing_type: typeId, material_code: matCode, params: vp, girth: null, bends: null, piece_length_ft: null, price_per_piece: perPiece, description: desc };
   const matType = matCode.split("-")[0], matColor = matCode.split("-")[1] || "G";
@@ -778,7 +834,11 @@ function BuilderPage({ guest, onAddToCart, onSavePart, disc = (x) => x, discPct 
             </div>
           </div>
         )}
-        {isSheet ? (
+        {isPan ? (
+          <div className="fld"><label>Quantity (each)</label>
+            <input type="number" min="1" value={pieces} onChange={(e) => setPieces(Math.max(1, parseInt(e.target.value) || 1))} />
+          </div>
+        ) : isSheet ? (
           <div className="g2">
             <div className="fld"><label>Piece Length (ft)</label>
               {isCustom
@@ -815,22 +875,33 @@ function BuilderPage({ guest, onAddToCart, onSavePart, disc = (x) => x, discPct 
               : <>
                   <button className="btn btn-o btn-sm" onClick={() => setParams((pp) => ({ ...pp, segs: (pp.segs || []).slice(0, -1) }))}>Undo Point</button>
                   <button className="btn btn-p btn-sm" onClick={() => setDrawMode(false)}>Finish</button>
+                  <span className="zoomctl">
+                    <button className="btn btn-o btn-sm" title="Zoom in (smaller canvas, easier small bends)" onClick={() => setDrawSpan((s) => Math.max(4, s - 3))}>＋</button>
+                    <button className="btn btn-o btn-sm" title="Zoom out" onClick={() => setDrawSpan((s) => Math.min(30, s + 3))}>－</button>
+                  </span>
                 </>}
             <span style={{ fontSize: 12, color: "var(--mut)", alignSelf: "center" }}>
-              {drawMode ? "Tap to drop each corner — snaps to 1° & 1/16″. Double-tap or Finish when done." : "Tap a corner to draw, or edit the fields on the left."}
+              {drawMode ? `Tap to drop each corner — snaps to 1° & 1/16″. Canvas ≈ ${drawSpan}″.` : "Tap a corner to draw, or edit the fields on the left."}
             </span>
           </div>
         )}
         <div className="preview3d">
-          {isSheet
+          {isPan
+            ? <Pan3D p={vp} height={300} />
+            : isSheet
             ? (isCustom
-                ? <ProfileCanvas segs={params.segs || []} onChange={(segs) => setParams((pp) => ({ ...pp, segs }))} drawMode={drawMode} onFinish={() => setDrawMode(false)} height={300} />
+                ? <ProfileCanvas segs={params.segs || []} onChange={(segs) => setParams((pp) => ({ ...pp, segs }))} drawMode={drawMode} onFinish={() => setDrawMode(false)} span={drawSpan} height={300} />
                 : <Flashing3D points={pts} lengthFt={lenFt} materialCode={matCode} height={300} />)
             : <SinglePly3D geo={geo} materialCode={matCode} split={split} height={300} />}
         </div>
         <div className="spec">
           <div><span>Part Number</span><b style={{ fontSize: 13 }}>{partNo}</b></div>
-          {isSheet ? (<>
+          {isPan ? (<>
+            <div><span>Size (L×W×H)</span><b>{vp.length}×{vp.width}×{vp.height}"</b></div>
+            <div><span>Flat Blank</span><b>{panBlank(vp).l}×{panBlank(vp).w}"</b></div>
+            <div><span>Each</span><b>{fmt(disc(perPiece))}</b></div>
+            <div><span>{pieces} each</span><b>{fmt(disc(total))}</b></div>
+          </>) : isSheet ? (<>
             <div><span>{isCustom ? "Stretch-Out" : "Girth"}</span><b>{girth}"</b></div>
             <div><span>Bends</span><b>{bends}</b></div>
             <div><span>Per Piece ({effLen}')</span><b>{fmt(disc(perPiece))}</b></div>
@@ -985,15 +1056,28 @@ function RequestDetail({ req, items, msgs, role, contractor, user, onBack, onSen
                     <td style={{ whiteSpace: "nowrap" }}>{i.qty} {i.unit === "lf" ? "LF" : i.unit === "pc" ? "pcs" : "EA"}</td>
                     <td>{fmt(i.unit_price)}</td><td>{fmt(i.line_total)}</td>
                   </tr>
-                  {i.item_kind === "custom" && i.detail?.params && (
+                  {i.item_kind === "custom" && i.detail?.params && (() => {
+                    const dt = typeById(i.detail.flashing_type);
+                    const dSheet = (dt.kind || "sheet") === "sheet";
+                    const dxf = role === "admin" && dSheet ? partDXF(i.detail.flashing_type, i.detail.params) : null;
+                    return (
                     <tr><td colSpan="4" style={{ background: "#f8fafc" }}>
                       <div className="preview3d" style={{ maxWidth: 420 }}>
-                        {(typeById(i.detail.flashing_type).kind || "sheet") === "sheet"
-                          ? <Flashing3D points={typeById(i.detail.flashing_type).points(i.detail.params)} lengthFt={i.detail.piece_length_ft} materialCode={i.detail.material_code} height={170} />
-                          : <SinglePly3D geo={typeById(i.detail.flashing_type).geometry(i.detail.params)} materialCode={i.detail.material_code} split={!!i.detail.params.split} height={170} />}
+                        {dt.pan
+                          ? <Pan3D p={i.detail.params} height={170} />
+                          : dSheet
+                          ? <Flashing3D points={dt.points(i.detail.params)} lengthFt={i.detail.piece_length_ft} materialCode={i.detail.material_code} height={170} />
+                          : <SinglePly3D geo={dt.geometry(i.detail.params)} materialCode={i.detail.material_code} split={!!i.detail.params.split} height={170} />}
                       </div>
+                      {dxf && (
+                        <button className="btn btn-o btn-sm" style={{ marginTop: 8 }}
+                          onClick={() => downloadDXF(`${i.sku || i.part_number || "flashing"}.dxf`, dxf)}>
+                          {IC.print}&nbsp;Download DXF{dt.pan ? " (flat blank)" : " (profile)"}
+                        </button>
+                      )}
                     </td></tr>
-                  )}
+                    );
+                  })()}
                 </React.Fragment>
               ))}
               <tr>
