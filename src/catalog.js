@@ -399,6 +399,62 @@ export const FLASHING_TYPES = [
     },
     dims: (p) => `${p.legA}" x ${p.legB}" legs @ ${p.openAngle}°`,
   },
+  {
+    id: "cap",
+    code: "CAP",
+    name: "Sheet Metal Cap",
+    fields: [
+      { key: "width", label: "Cap Width — W (in)", def: 8, min: 2, max: 30 },
+      { key: "height", label: "Side Height — H (in)", def: 3, min: 0.5, max: 14, step: 0.25 },
+      { key: "kick", label: "Kick-Out (in)", def: 0.75, min: 0.25, max: 2, step: 0.25 },
+      { key: "kickAngle", label: "Kick Angle (°)", def: 45, min: 15, max: 75, step: 5 },
+      { key: "edge", label: "Bottom Edge", type: "choice", def: "plain", options: [
+        { value: "plain", label: "Plain — no kick, no hem" },
+        { value: "kick", label: "Kick only" },
+        { value: "hem", label: "Hem only" },
+        { value: "hemkick", label: "Hem + Kick" },
+      ] },
+    ],
+    // Cap = flat top of width W with a leg of height H down each side; optional kick-out + hemmed edge.
+    // Length (L) is the piece length set below; girth = W + 2·H (+ kick/hem allowances).
+    points: (p) => {
+      const W = p.width, H = p.height;
+      const ka = rad(p.kickAngle ?? 45), kick = p.kick ?? 0;
+      const useKick = (p.edge === "kick" || p.edge === "hemkick") && kick > 0;
+      const useHem = (p.edge === "hem" || p.edge === "hemkick");
+      const hl = 0.5; // hemmed return length
+      const pts = [];
+      // left leg (bottom -> top), kick flares out to -x
+      const lTip = useKick ? [-Math.sin(ka) * kick, H + Math.cos(ka) * kick] : [0, H];
+      if (useHem) pts.push([lTip[0] + hl, lTip[1]]);
+      pts.push(lTip);
+      if (useKick) pts.push([0, H]);
+      pts.push([0, 0]);
+      // across the top
+      pts.push([W, 0]);
+      // right leg (top -> bottom), kick flares out to +x
+      pts.push([W, H]);
+      const rTip = useKick ? [W + Math.sin(ka) * kick, H + Math.cos(ka) * kick] : [W, H];
+      if (useKick) pts.push(rTip);
+      if (useHem) pts.push([rTip[0] - hl, rTip[1]]);
+      return pts;
+    },
+    dims: (p) => `${p.width}"W × ${p.height}"H cap` +
+      (p.edge === "plain" ? "" : p.edge === "hem" ? ", hemmed edge"
+        : p.edge === "kick" ? `, ${p.kick}" kick @ ${p.kickAngle}°`
+        : `, ${p.kick}" kick @ ${p.kickAngle}° + hem`),
+  },
+  {
+    id: "customProfile",
+    code: "PRO",
+    name: "Custom Profile (draw your own)",
+    custom: true,
+    fields: [],
+    // Segments: [{ len, ang }] — ang is the bend angle (deg) applied BEFORE the segment; first segment has no bend.
+    defaultSegs: () => [{ len: 3, ang: 0 }, { len: 3, ang: 90 }, { len: 0.5, ang: 35 }],
+    points: (p) => customProfilePoints(p.segs || []),
+    dims: (p) => customProfileDims(p.segs || []),
+  },
 
   // ── Single-ply membrane flashings (TPO / PVC) — revolved, priced EACH ──
   {
@@ -495,6 +551,29 @@ export const profileGirth = (pts) => {
 };
 export const profileBends = (pts) => Math.max(0, pts.length - 2);
 
+// ─── Custom drawn profile — segments [{len, ang}] traced as a polyline ───
+// ang = bend angle in degrees applied before the segment (first segment's is ignored).
+// Screen coords: x right, y down. Positive angle bends downward/clockwise; negative bends the other way.
+export const customProfilePoints = (segs) => {
+  const pts = [[0, 0]];
+  let heading = 0, x = 0, y = 0;
+  (segs || []).forEach((s, i) => {
+    const len = Math.max(0, parseFloat(s.len) || 0);
+    if (i > 0) heading += (parseFloat(s.ang) || 0);
+    const r = rad(heading);
+    x += Math.cos(r) * len; y += Math.sin(r) * len;
+    pts.push([x, y]);
+  });
+  return pts;
+};
+export const customProfileStretch = (segs) =>
+  Math.round((segs || []).reduce((g, s) => g + Math.max(0, parseFloat(s.len) || 0), 0) * 100) / 100;
+export const customProfileDims = (segs) => (segs || []).map((s, i) => {
+  const U = String.fromCharCode(65 + i);
+  const len = Math.round((parseFloat(s.len) || 0) * 100) / 100;
+  return i === 0 ? `${U}=${len}"` : `${U}=${len}" (${parseFloat(s.ang) || 0}°)`;
+}).join(" · ");
+
 const BEND_CHARGE = 0.5; // $ per bend per piece
 const MIN_PIECE = 14; // shop minimum per piece
 
@@ -513,7 +592,8 @@ export const customPartNumber = (typeId, matCode, girth) => {
 export const customDescription = (typeId, matCode, params, lengthFt, girth) => {
   const t = typeById(typeId);
   const m = matByCode(matCode);
-  return `Custom ${t.name} — ${m.name}, ${t.dims(params)}, ${girth}" girth, ${lengthFt}'-0" lengths`;
+  const girthLabel = t.custom ? `${girth}" stretch-out` : `${girth}" girth`;
+  return `${t.custom ? "" : "Custom "}${t.name} — ${m.name}, ${t.dims(params)}, ${girthLabel}, ${lengthFt}'-0" lengths`;
 };
 
 // ─── Single-ply membrane pricing ───
@@ -547,6 +627,7 @@ export const defaultParams = (typeId) => {
   const t = typeById(typeId);
   const p = {};
   t.fields.forEach((f) => (p[f.key] = f.def));
+  if (t.custom) p.segs = t.defaultSegs ? t.defaultSegs() : [{ len: 3, ang: 0 }, { len: 3, ang: 90 }];
   if (t.splittable) p.split = false;
   if (t.kind === "membrane") p.mil = 60;
   return p;

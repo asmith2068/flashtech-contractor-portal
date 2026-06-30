@@ -7,6 +7,7 @@ import {
   profileGirth, profileBends, piecePrice, customPartNumber, customDescription, defaultParams,
   membranePrice, membranePartNumber, membraneDescription,
   scupperPrice, scupperPartNumber, scupperSides, scupperTier, productImage, POPULAR_SKUS,
+  customProfilePoints,
 } from "./catalog.js";
 
 // ─── UTILITIES ───────────────────────────────────────────────
@@ -231,6 +232,13 @@ tr.click:hover { background:#f0fdf4; cursor:pointer; }
 .preview3d { background:linear-gradient(160deg,#f8fafc,#e2e8f0); border:1px solid var(--line); border-radius:0; padding:10px; }
 .spec { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:10px; margin-top:12px; }
 .spec div { background:#f8fafc; border:1px solid var(--line); border-radius:0; padding:9px 11px; }
+/* CUSTOM PROFILE EDITOR */
+.profrows { display:flex; flex-direction:column; gap:7px; }
+.profrow { display:flex; align-items:flex-end; gap:8px; }
+.profrow .seglet { font-family:'Oswald',sans-serif; font-weight:700; font-size:15px; background:#0b0d0b; color:var(--lime); width:28px; height:34px; display:flex; align-items:center; justify-content:center; flex:0 0 28px; }
+.profrow .segf { flex:1; }
+.profrow .segf label { font-size:10px; margin-bottom:2px; }
+.profrow .segf input { padding:6px 8px; }
 .spec b { display:block; font-size:15px; } .spec span { font-size:11px; color:var(--mut); text-transform:uppercase; font-weight:600; }
 /* LOGIN */
 .login { min-height:100vh; display:flex; align-items:center; justify-content:center; background:linear-gradient(160deg,#000 0%,#0a140a 65%,#11320f 130%); padding:18px; }
@@ -487,6 +495,72 @@ function CatalogPage({ products, onAdd, disc = (x) => x, discPct = 0, seedCat = 
   );
 }
 
+// ─── CUSTOM PROFILE: segment editor (A/B/C lengths + bend angles) ───
+function ProfileEditor({ segs, onChange }) {
+  const set = (i, key, val) => onChange(segs.map((s, j) => (j === i ? { ...s, [key]: val } : s)));
+  const add = () => { if (segs.length < 11) onChange([...segs, { len: 2, ang: 90 }]); };
+  const removeLast = () => { if (segs.length > 2) onChange(segs.slice(0, -1)); };
+  return (
+    <div className="fld">
+      <label>Profile Segments — length &amp; bend angle</label>
+      <div style={{ fontSize: 12, color: "var(--mut)", margin: "0 0 9px" }}>
+        Enter each straight run (A, B, C…) and the bend angle before it. The first run has no bend. Use a negative angle to bend the opposite way. Up to 10 bends.
+      </div>
+      <div className="profrows">
+        {segs.map((s, i) => {
+          const U = String.fromCharCode(65 + i), L = String.fromCharCode(97 + i);
+          return (
+            <div className="profrow" key={i}>
+              <span className="seglet">{U}</span>
+              <div className="segf"><label>Length (in)</label>
+                <input type="number" min="0" step="0.25" value={s.len}
+                  onChange={(e) => set(i, "len", e.target.value)} /></div>
+              <div className="segf"><label>{i === 0 ? "Start" : `Bend ${L} (°)`}</label>
+                <input type="number" step="5" value={i === 0 ? 0 : s.ang} disabled={i === 0}
+                  placeholder={i === 0 ? "—" : "°"} onChange={(e) => set(i, "ang", e.target.value)} /></div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="row" style={{ marginTop: 9 }}>
+        <button className="btn btn-o btn-sm" onClick={add} disabled={segs.length >= 11}>{IC.plus}Add Bend</button>
+        <button className="btn btn-o btn-sm" onClick={removeLast} disabled={segs.length <= 2}>Remove Last</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── CUSTOM PROFILE: labeled 2D cross-section drawing ───
+function ProfileDrawing({ segs, color = "#0DD714", height = 300 }) {
+  const pts = customProfilePoints(segs);
+  const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+  const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+  const w = Math.max(0.5, maxX - minX), h = Math.max(0.5, maxY - minY);
+  const span = Math.max(w, h);
+  const pad = span * 0.22 + 0.5;
+  const lw = span * 0.02, fs = span * 0.058, r2 = (n) => Math.round(n * 100) / 100;
+  const poly = pts.map((p) => `${p[0]},${p[1]}`).join(" ");
+  return (
+    <svg viewBox={`${minX - pad} ${minY - pad} ${w + pad * 2} ${h + pad * 2}`} width="100%" height={height} style={{ display: "block" }}>
+      <polyline points={poly} fill="none" stroke={color} strokeWidth={lw} strokeLinejoin="round" strokeLinecap="round" />
+      {pts.map((p, i) => <circle key={"v" + i} cx={p[0]} cy={p[1]} r={lw * 1.15} fill="#0b0d0b" />)}
+      {pts.slice(1).map((b, i) => {
+        const a = pts[i];
+        const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
+        const len = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+        const nx = -(b[1] - a[1]) / len, ny = (b[0] - a[0]) / len;
+        const off = fs * 1.05;
+        return <text key={"s" + i} x={mx + nx * off} y={my + ny * off} fontSize={fs} fill="#0b0d0b"
+          textAnchor="middle" dominantBaseline="middle" fontWeight="700" style={{ fontFamily: "Oswald, sans-serif" }}>{String.fromCharCode(65 + i)}={r2(len)}"</text>;
+      })}
+      {segs.map((s, i) => (i > 0 && Math.abs(parseFloat(s.ang) || 0) > 0
+        ? <text key={"a" + i} x={pts[i][0]} y={pts[i][1] - fs * 0.5} fontSize={fs * 0.82} fill="#0aa810"
+            textAnchor="middle" dominantBaseline="middle" fontWeight="700">{parseFloat(s.ang)}°</text>
+        : null))}
+    </svg>
+  );
+}
+
 // ─── CUSTOM FLASHING BUILDER ─────────────────────────────────
 function BuilderPage({ guest, onAddToCart, onSavePart, disc = (x) => x, discPct = 0, detectInfo = null, detectNonce = 0, seedType = null, seedNonce = 0 }) {
   const [typeId, setTypeId] = useState("dripEdge");
@@ -502,6 +576,7 @@ function BuilderPage({ guest, onAddToCart, onSavePart, disc = (x) => x, discPct 
 
   // Valid/sanitized params for all math & saving — lets the inputs hold blank/partial
   // values mid-edit (so you can clear and retype) without breaking the live preview.
+  const isCustom = isSheet && !!t.custom;
   const vp = useMemo(() => {
     const o = { ...params };
     for (const f of t.fields) {
@@ -509,10 +584,14 @@ function BuilderPage({ guest, onAddToCart, onSavePart, disc = (x) => x, discPct 
       const n = parseFloat(params[f.key]);
       o[f.key] = isNaN(n) ? f.def : Math.max(f.min, Math.min(f.max, n));
     }
+    if (t.custom && Array.isArray(o.segs)) {
+      o.segs = o.segs.map((s, i) => ({ len: Math.max(0, parseFloat(s.len) || 0), ang: i === 0 ? 0 : (parseFloat(s.ang) || 0) }));
+    }
     return o;
   }, [t, params]);
 
-  // sheet-metal path
+  // sheet-metal path. Custom drawn profiles are always priced as a 10' piece.
+  const effLen = isCustom ? 10 : lenFt;
   const pts = useMemo(() => (isSheet ? t.points(vp) : []), [isSheet, t, vp]);
   const girth = isSheet ? profileGirth(pts) : 0;
   const bends = isSheet ? profileBends(pts) : 0;
@@ -521,14 +600,14 @@ function BuilderPage({ guest, onAddToCart, onSavePart, disc = (x) => x, discPct 
   const split = !!vp.split;
   const isScupper = !isSheet && geo && geo.shape === "scupper";
 
-  const perPiece = isSheet ? piecePrice(girth, bends, lenFt, matCode)
+  const perPiece = isSheet ? piecePrice(girth, bends, effLen, matCode)
     : isScupper ? scupperPrice(geo, matCode)
     : membranePrice(geo, matCode, split, vp.mil);
-  const perLF = isSheet ? Math.round((perPiece / lenFt) * 100) / 100 : null;
+  const perLF = isSheet ? Math.round((perPiece / effLen) * 100) / 100 : null;
   const partNo = isSheet ? customPartNumber(typeId, matCode, girth)
     : isScupper ? scupperPartNumber(matCode, geo)
     : membranePartNumber(typeId, matCode, geo, split);
-  const desc = isSheet ? customDescription(typeId, matCode, vp, lenFt, girth) : membraneDescription(typeId, matCode, vp, split);
+  const desc = isSheet ? customDescription(typeId, matCode, vp, effLen, girth) : membraneDescription(typeId, matCode, vp, split);
   const total = Math.round(perPiece * pieces * 100) / 100;
 
   const pickType = (id) => {
@@ -546,7 +625,7 @@ function BuilderPage({ guest, onAddToCart, onSavePart, disc = (x) => x, discPct 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seedNonce]);
   const custom = isSheet
-    ? { part_number: partNo, name: name || `${t.name} ${girth}"`, flashing_type: typeId, material_code: matCode, params: vp, girth, bends, piece_length_ft: lenFt, price_per_piece: perPiece, description: desc }
+    ? { part_number: partNo, name: name || `${t.name} ${girth}"`, flashing_type: typeId, material_code: matCode, params: vp, girth, bends, piece_length_ft: effLen, price_per_piece: perPiece, description: desc }
     : { part_number: partNo, name: name || `${split ? "Split " : ""}${t.name}`, flashing_type: typeId, material_code: matCode, params: vp, girth: null, bends: null, piece_length_ft: null, price_per_piece: perPiece, description: desc };
   const matType = matCode.split("-")[0], matColor = matCode.split("-")[1] || "G";
 
@@ -595,6 +674,7 @@ function BuilderPage({ guest, onAddToCart, onSavePart, disc = (x) => x, discPct 
             </div>
           </>
         )}
+        {isCustom && <ProfileEditor segs={params.segs || []} onChange={(segs) => setParams((pp) => ({ ...pp, segs }))} />}
         {t.fields.map((f) => (
           <div className="fld" key={f.key}>
             <label>{f.label}</label>
@@ -616,7 +696,9 @@ function BuilderPage({ guest, onAddToCart, onSavePart, disc = (x) => x, discPct 
         {isSheet ? (
           <div className="g2">
             <div className="fld"><label>Piece Length (ft)</label>
-              <select value={lenFt} onChange={(e) => setLenFt(parseFloat(e.target.value))}>{[8, 10, 12].map((l) => <option key={l} value={l}>{l}'-0"</option>)}</select>
+              {isCustom
+                ? <input value={`10'-0"`} disabled title="Custom profiles are priced per 10' piece" />
+                : <select value={lenFt} onChange={(e) => setLenFt(parseFloat(e.target.value))}>{[8, 10, 12].map((l) => <option key={l} value={l}>{l}'-0"</option>)}</select>}
             </div>
             <div className="fld"><label># of Pieces</label>
               <input type="number" min="1" value={pieces} onChange={(e) => setPieces(Math.max(1, parseInt(e.target.value) || 1))} />
@@ -643,17 +725,19 @@ function BuilderPage({ guest, onAddToCart, onSavePart, disc = (x) => x, discPct 
       <div>
         <div className="preview3d">
           {isSheet
-            ? <Flashing3D points={pts} lengthFt={lenFt} materialCode={matCode} height={300} />
+            ? (isCustom
+                ? <ProfileDrawing segs={params.segs || []} height={300} />
+                : <Flashing3D points={pts} lengthFt={lenFt} materialCode={matCode} height={300} />)
             : <SinglePly3D geo={geo} materialCode={matCode} split={split} height={300} />}
         </div>
         <div className="spec">
           <div><span>Part Number</span><b style={{ fontSize: 13 }}>{partNo}</b></div>
           {isSheet ? (<>
-            <div><span>Girth</span><b>{girth}"</b></div>
+            <div><span>{isCustom ? "Stretch-Out" : "Girth"}</span><b>{girth}"</b></div>
             <div><span>Bends</span><b>{bends}</b></div>
-            <div><span>Per Piece</span><b>{fmt(disc(perPiece))}</b></div>
+            <div><span>Per Piece ({effLen}')</span><b>{fmt(disc(perPiece))}</b></div>
             <div><span>Per Lin. Ft</span><b>{fmt(disc(perLF))}</b></div>
-            <div><span>{pieces} pcs ({pieces * lenFt} LF)</span><b>{fmt(disc(total))}</b></div>
+            <div><span>{pieces} pcs ({pieces * effLen} LF)</span><b>{fmt(disc(total))}</b></div>
           </>) : isScupper ? (<>
             <div><span>Opening</span><b>{geo.w}"×{geo.h}"</b></div>
             <div><span>Throat</span><b>{geo.throat}"</b></div>
