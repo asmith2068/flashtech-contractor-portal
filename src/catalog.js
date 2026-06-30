@@ -403,17 +403,21 @@ export const FLASHING_TYPES = [
     id: "cap",
     code: "CAP",
     name: "Box / Pan Cap",
-    pan: true, // 4-sided box cap: closed top L×W, sides fold DOWN by H with hemmed-tab corners. Priced EACH.
+    pan: true, // 4-sided box cap: closed top L×W, sides fold DOWN by H, kick-out + hemmed-tab corners. Priced EACH.
     fields: [
-      { key: "length", label: "Length — L (in)", def: 12, min: 2, max: 60 },
-      { key: "width", label: "Width — W (in)", def: 12, min: 2, max: 60 },
+      { key: "length", label: "Length — L (in)", def: 12, min: 2, max: 120 },
+      { key: "width", label: "Width — W (in)", def: 24, min: 2, max: 120 },
       { key: "height", label: "Side Height — H (in)", def: 3, min: 0.5, max: 16, step: 0.25 },
+      { key: "kick", label: "Kick-Out (in)", def: 0.5, min: 0, max: 2, step: 0.25 },
+      { key: "kickAngle", label: "Kick Angle (°)", def: 35, min: 0, max: 75, step: 5 },
       { key: "hem", label: "Bottom Edge", type: "choice", def: "hem", options: [
         { value: "hem", label: 'Hemmed edge (½")' },
         { value: "raw", label: "Raw edge" },
       ] },
     ],
-    dims: (p) => `${p.length}"L × ${p.width}"W × ${p.height}"H box cap, hemmed-tab corners${p.hem === "hem" ? ", hemmed edge" : ""}`,
+    dims: (p) => `${p.length}"L × ${p.width}"W × ${p.height}"H box cap` +
+      (p.kick > 0 ? `, ${p.kick}" kick @ ${p.kickAngle}°` : "") +
+      (p.hem === "hem" ? ', ½" hemmed edge' : "") + ", hemmed-tab corners",
   },
   {
     id: "customProfile",
@@ -570,20 +574,23 @@ export const customDescription = (typeId, matCode, params, lengthFt, girth) => {
   return `${t.custom ? "" : "Custom "}${t.name} — ${m.name}, ${t.dims(params)}, ${girthLabel}, ${lengthFt}'-0" lengths`;
 };
 
-// ─── Box / Pan cap — 4-sided box, priced EACH by flat-blank area + fab ───
-const PAN_CORNER = 1.75;   // $ per hemmed-tab corner
-const PAN_HEM_RATE = 0.02; // $ per inch of hemmed edge
+// ─── Box / Pan cap — 4-sided box, priced EACH ───
+// Side stretch-out S = vertical height + kick + hem; flat blank = (L+2S)(W+2S).
+export const panSide = (p) => (parseFloat(p.height) || 0) + (parseFloat(p.kick) || 0) + (p.hem === "hem" ? 0.5 : 0);
 export const panBlank = (p) => {
-  const L = parseFloat(p.length) || 0, W = parseFloat(p.width) || 0, H = parseFloat(p.height) || 0;
-  return { l: Math.round((L + 2 * H) * 100) / 100, w: Math.round((W + 2 * H) * 100) / 100 };
+  const L = parseFloat(p.length) || 0, W = parseFloat(p.width) || 0, S = panSide(p);
+  return { l: Math.round((L + 2 * S) * 100) / 100, w: Math.round((W + 2 * S) * 100) / 100, s: Math.round(S * 100) / 100 };
 };
+// Calibrated to Flash-Tech list pricing (galvanized): 36×48×3" (½" kick+hem) = $175, 12×24×3" = $105.
+// price = (PAN_BASE + PAN_AREA × flatBlankArea), scaled by material vs. galvanized 26ga.
+const PAN_BASE = 80.44;
+const PAN_AREA = 0.038377; // $ per sq-in of flat blank
 export const panPrice = (p, matCode) => {
-  const m = matByCode(matCode);
-  const L = parseFloat(p.length) || 0, W = parseFloat(p.width) || 0, H = parseFloat(p.height) || 0;
-  const areaSqFt = ((L + 2 * H) * (W + 2 * H)) / 144;
-  const hem = p.hem === "hem" ? 2 * (L + W) * PAN_HEM_RATE : 0;
-  const raw = areaSqFt * (m.rate * 12) + 4 * BEND_CHARGE + 4 * PAN_CORNER + hem;
-  return Math.round(Math.max(MIN_PIECE, raw) * 100) / 100;
+  const L = parseFloat(p.length) || 0, W = parseFloat(p.width) || 0, S = panSide(p);
+  const blankArea = (L + 2 * S) * (W + 2 * S);
+  const usd = PAN_BASE + PAN_AREA * blankArea;
+  const mult = (matByCode(matCode).rate || 0.26) / (matByCode("G26").rate || 0.26);
+  return Math.round(Math.max(MIN_PIECE, usd * mult) * 100) / 100;
 };
 export const panPartNumber = (matCode, p) =>
   `FT-CX-CAP-${matCode}-${Math.round(parseFloat(p.length) || 0)}x${Math.round(parseFloat(p.width) || 0)}x${Math.round(parseFloat(p.height) || 0)}`;
@@ -603,20 +610,25 @@ export const profileDXF = (points) => {
   for (let i = 1; i < points.length; i++) s += dxfLine(points[i - 1][0], -points[i - 1][1], points[i][0], -points[i][1], "PROFILE");
   return s + dxfFooter();
 };
-// Box/pan flat blank: cross/plus outline (CUT) with hemmed corner tabs + fold lines (BEND).
+// Box/pan flat blank: cross/plus outline (CUT) with hemmed corner tabs + all fold lines (BEND).
 export const panFlatDXF = (p) => {
-  const L = Math.max(0.1, parseFloat(p.length) || 0), W = Math.max(0.1, parseFloat(p.width) || 0), H = Math.max(0.1, parseFloat(p.height) || 0);
-  const a = H, t = Math.min(H * 0.6, 0.75); // a = side depth, t = hemmed corner tab
+  const L = Math.max(0.1, parseFloat(p.length) || 0), W = Math.max(0.1, parseFloat(p.width) || 0);
+  const H = Math.max(0.1, parseFloat(p.height) || 0), kick = Math.max(0, parseFloat(p.kick) || 0), hem = p.hem === "hem" ? 0.5 : 0;
+  const a = H + kick + hem, t = 0.625; // a = full side stretch-out, t = hemmed corner tab
   const V = [
     [a, 0], [a + L, 0], [a + L, a - t], [2 * a + L, a - t], [2 * a + L, a + W + t], [a + L, a + W + t],
     [a + L, 2 * a + W], [a, 2 * a + W], [a, a + W + t], [0, a + W + t], [0, a - t], [a, a - t],
   ];
   let s = dxfHeader();
   for (let i = 0; i < V.length; i++) { const j = (i + 1) % V.length; s += dxfLine(V[i][0], V[i][1], V[j][0], V[j][1], "CUT"); }
-  s += dxfLine(a, a, a + L, a, "BEND");
-  s += dxfLine(a, a + W, a + L, a + W, "BEND");
-  s += dxfLine(a, a, a, a + W, "BEND");
-  s += dxfLine(a + L, a, a + L, a + W, "BEND");
+  const foldH = (y) => dxfLine(a, y, a + L, y, "BEND");   // across bottom/top flaps
+  const foldV = (x) => dxfLine(x, a, x, a + W, "BEND");   // across left/right flaps
+  // main panel folds (top rim of each side)
+  s += foldH(a) + foldH(a + W) + foldV(a) + foldV(a + L);
+  // kick folds (bottom of the vertical side)
+  if (kick > 0) s += foldH(a - H) + foldH(a + W + H) + foldV(a - H) + foldV(a + L + H);
+  // hem folds (the turned ½" edge)
+  if (hem > 0) s += foldH(a - H - kick) + foldH(a + W + H + kick) + foldV(a - H - kick) + foldV(a + L + H + kick);
   return s + dxfFooter();
 };
 // Pick the right DXF for a saved sheet-metal part (pan flat blank vs linear profile).
