@@ -504,7 +504,7 @@ function ProfileEditor({ segs, onChange }) {
     <div className="fld">
       <label>Profile Segments — length &amp; bend angle</label>
       <div style={{ fontSize: 12, color: "var(--mut)", margin: "0 0 9px" }}>
-        Enter each straight run (A, B, C…) and the bend angle before it. The first run has no bend. Use a negative angle to bend the opposite way. Up to 10 bends.
+        Draw it on the canvas, or type here. Each row is a straight run (A, B, C…) and the bend angle before it. Negative angle bends the opposite way; up to 10 bends.
       </div>
       <div className="profrows">
         {segs.map((s, i) => {
@@ -515,9 +515,9 @@ function ProfileEditor({ segs, onChange }) {
               <div className="segf"><label>Length (in)</label>
                 <input type="number" min="0" step="0.25" value={s.len}
                   onChange={(e) => set(i, "len", e.target.value)} /></div>
-              <div className="segf"><label>{i === 0 ? "Start" : `Bend ${L} (°)`}</label>
-                <input type="number" step="5" value={i === 0 ? 0 : s.ang} disabled={i === 0}
-                  placeholder={i === 0 ? "—" : "°"} onChange={(e) => set(i, "ang", e.target.value)} /></div>
+              <div className="segf"><label>{i === 0 ? "Start °" : `Bend ${L} (°)`}</label>
+                <input type="number" step={i === 0 ? 1 : 5} value={s.ang}
+                  placeholder="°" onChange={(e) => set(i, "ang", e.target.value)} /></div>
             </div>
           );
         })}
@@ -530,33 +530,114 @@ function ProfileEditor({ segs, onChange }) {
   );
 }
 
-// ─── CUSTOM PROFILE: labeled 2D cross-section drawing ───
-function ProfileDrawing({ segs, color = "#0DD714", height = 300 }) {
+// ─── CUSTOM PROFILE: snapping helpers ───
+const SNAP_IN = 1 / 16;                                   // snap lengths to nearest 1/16"
+const snapLen = (v) => Math.max(SNAP_IN, Math.round(v / SNAP_IN) * SNAP_IN);
+const snapDeg = (v) => Math.round(v);                      // snap angles to nearest degree
+const normDeg = (a) => { a = ((a % 360) + 360) % 360; return a > 180 ? a - 360 : a; }; // tidy to (-180, 180]
+const fmtIn = (v) => {                                     // 3.0625 -> 3 1/16"
+  let s16 = Math.round((parseFloat(v) || 0) * 16);
+  const neg = s16 < 0; s16 = Math.abs(s16);
+  const whole = Math.floor(s16 / 16);
+  let num = s16 % 16, den = 16;
+  while (num && num % 2 === 0) { num /= 2; den /= 2; }
+  const body = num ? `${whole ? whole + " " : ""}${num}/${den}` : `${whole}`;
+  return `${neg ? "-" : ""}${body}"`;
+};
+
+// ─── CUSTOM PROFILE: drawable 2D cross-section (mouse / touch) ───
+function ProfileCanvas({ segs, onChange, drawMode = false, onFinish = () => {}, color = "#0DD714", height = 300 }) {
+  const svgRef = useRef(null);
+  const [start, setStart] = useState(null);   // inch-space anchor of the first vertex
+  const [cursor, setCursor] = useState(null); // inch-space cursor while drawing
+  useEffect(() => { if (drawMode) { setStart(null); setCursor(null); } }, [drawMode]);
+
   const pts = customProfilePoints(segs);
-  const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
-  const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
-  const w = Math.max(0.5, maxX - minX), h = Math.max(0.5, maxY - minY);
-  const span = Math.max(w, h);
-  const pad = span * 0.22 + 0.5;
-  const lw = span * 0.02, fs = span * 0.058, r2 = (n) => Math.round(n * 100) / 100;
-  const poly = pts.map((p) => `${p[0]},${p[1]}`).join(" ");
+  const heading = segs.reduce((h, s) => h + (parseFloat(s.ang) || 0), 0); // current pen heading (deg)
+  const off = drawMode && start ? start : { x: 0, y: 0 };
+  const tip = pts[pts.length - 1];
+  const penTip = { x: off.x + tip[0], y: off.y + tip[1] };
+
+  const toInch = (e) => {
+    const svg = svgRef.current; if (!svg) return null;
+    const m = svg.getScreenCTM(); if (!m) return null;
+    const p = svg.createSVGPoint(); p.x = e.clientX; p.y = e.clientY;
+    const loc = p.matrixTransform(m.inverse());
+    return { x: loc.x, y: loc.y };
+  };
+  const calcSeg = (target) => {
+    const dx = target.x - penTip.x, dy = target.y - penTip.y;
+    return { len: snapLen(Math.hypot(dx, dy)), absAng: snapDeg(Math.atan2(dy, dx) * 180 / Math.PI) };
+  };
+  const onDown = (e) => {
+    if (!drawMode) return;
+    e.preventDefault();
+    const ip = toInch(e); if (!ip) return;
+    if (!start) { setStart(ip); setCursor(ip); return; }
+    if (segs.length >= 11) return;
+    const { len, absAng } = calcSeg(ip);
+    if (segs.length === 0) onChange([{ len, ang: normDeg(absAng) }]);
+    else onChange([...segs, { len, ang: normDeg(absAng - heading) }]);
+  };
+  const onMove = (e) => { if (drawMode) { const ip = toInch(e); if (ip) setCursor(ip); } };
+
+  // viewBox: fixed inch grid while drawing, auto-fit when static
+  let vb, grid = null, scale;
+  if (drawMode) {
+    const GX0 = -2, GY0 = -9, GW = 18, GH = 18; scale = 18;
+    vb = `${GX0} ${GY0} ${GW} ${GH}`;
+    const g = [];
+    for (let x = GX0; x <= GX0 + GW; x++) g.push(<line key={"gx" + x} x1={x} y1={GY0} x2={x} y2={GY0 + GH} stroke={x === 0 ? "#cbd5e1" : "#e8edf2"} strokeWidth="0.03" />);
+    for (let y = GY0; y <= GY0 + GH; y++) g.push(<line key={"gy" + y} x1={GX0} y1={y} x2={GX0 + GW} y2={y} stroke={y === 0 ? "#cbd5e1" : "#e8edf2"} strokeWidth="0.03" />);
+    grid = g;
+  } else {
+    const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+    const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+    const w = Math.max(0.5, maxX - minX), h = Math.max(0.5, maxY - minY); scale = Math.max(w, h);
+    const pad = scale * 0.22 + 0.5;
+    vb = `${minX - pad} ${minY - pad} ${w + pad * 2} ${h + pad * 2}`;
+  }
+  const lw = scale * 0.02, fs = scale * 0.058, r2 = (n) => Math.round(n * 100) / 100;
+  const dpts = pts.map((p) => [p[0] + off.x, p[1] + off.y]);
+  const poly = dpts.map((p) => `${p[0]},${p[1]}`).join(" ");
+
+  // rubber-band preview of the next snapped segment
+  let preview = null;
+  if (drawMode && start && cursor) {
+    const { len, absAng } = calcSeg(cursor);
+    const rr = absAng * Math.PI / 180;
+    const end = { x: penTip.x + Math.cos(rr) * len, y: penTip.y + Math.sin(rr) * len };
+    const showAng = normDeg(segs.length === 0 ? absAng : absAng - heading);
+    preview = (
+      <g>
+        <line x1={penTip.x} y1={penTip.y} x2={end.x} y2={end.y} stroke="#0aa810" strokeWidth={lw} strokeDasharray={`${lw * 3} ${lw * 2}`} strokeLinecap="round" />
+        <circle cx={end.x} cy={end.y} r={lw * 1.5} fill="#0aa810" />
+        <text x={end.x + fs * 0.4} y={end.y - fs * 0.4} fontSize={fs} fill="#0aa810" fontWeight="700" style={{ fontFamily: "Oswald, sans-serif" }}>{fmtIn(len)} · {showAng}°</text>
+      </g>
+    );
+  }
+
   return (
-    <svg viewBox={`${minX - pad} ${minY - pad} ${w + pad * 2} ${h + pad * 2}`} width="100%" height={height} style={{ display: "block" }}>
+    <svg ref={svgRef} viewBox={vb} width="100%" height={height}
+      onPointerDown={onDown} onPointerMove={onMove} onDoubleClick={() => drawMode && onFinish()}
+      style={{ display: "block", touchAction: "none", cursor: drawMode ? "crosshair" : "default" }}>
+      {grid}
+      {drawMode && start && <circle cx={start.x} cy={start.y} r={lw * 1.6} fill="#0b0d0b" />}
       <polyline points={poly} fill="none" stroke={color} strokeWidth={lw} strokeLinejoin="round" strokeLinecap="round" />
-      {pts.map((p, i) => <circle key={"v" + i} cx={p[0]} cy={p[1]} r={lw * 1.15} fill="#0b0d0b" />)}
-      {pts.slice(1).map((b, i) => {
-        const a = pts[i];
+      {dpts.map((p, i) => <circle key={"v" + i} cx={p[0]} cy={p[1]} r={lw * 1.15} fill="#0b0d0b" />)}
+      {dpts.slice(1).map((b, i) => {
+        const a = dpts[i];
         const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
         const len = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
         const nx = -(b[1] - a[1]) / len, ny = (b[0] - a[0]) / len;
-        const off = fs * 1.05;
-        return <text key={"s" + i} x={mx + nx * off} y={my + ny * off} fontSize={fs} fill="#0b0d0b"
+        return <text key={"s" + i} x={mx + nx * fs * 1.05} y={my + ny * fs * 1.05} fontSize={fs} fill="#0b0d0b"
           textAnchor="middle" dominantBaseline="middle" fontWeight="700" style={{ fontFamily: "Oswald, sans-serif" }}>{String.fromCharCode(65 + i)}={r2(len)}"</text>;
       })}
       {segs.map((s, i) => (i > 0 && Math.abs(parseFloat(s.ang) || 0) > 0
-        ? <text key={"a" + i} x={pts[i][0]} y={pts[i][1] - fs * 0.5} fontSize={fs * 0.82} fill="#0aa810"
+        ? <text key={"a" + i} x={dpts[i][0]} y={dpts[i][1] - fs * 0.55} fontSize={fs * 0.82} fill="#0aa810"
             textAnchor="middle" dominantBaseline="middle" fontWeight="700">{parseFloat(s.ang)}°</text>
         : null))}
+      {preview}
     </svg>
   );
 }
@@ -570,6 +651,7 @@ function BuilderPage({ guest, onAddToCart, onSavePart, disc = (x) => x, discPct 
   const [pieces, setPieces] = useState(10);
   const [name, setName] = useState("");
   const [saved, setSaved] = useState("");
+  const [drawMode, setDrawMode] = useState(false);
 
   const t = typeById(typeId);
   const isSheet = (t.kind || "sheet") === "sheet";
@@ -585,7 +667,8 @@ function BuilderPage({ guest, onAddToCart, onSavePart, disc = (x) => x, discPct 
       o[f.key] = isNaN(n) ? f.def : Math.max(f.min, Math.min(f.max, n));
     }
     if (t.custom && Array.isArray(o.segs)) {
-      o.segs = o.segs.map((s, i) => ({ len: Math.max(0, parseFloat(s.len) || 0), ang: i === 0 ? 0 : (parseFloat(s.ang) || 0) }));
+      // First angle = absolute start heading; the rest are bends. All kept (drawing sets the start tilt).
+      o.segs = o.segs.map((s) => ({ len: Math.max(0, parseFloat(s.len) || 0), ang: parseFloat(s.ang) || 0 }));
     }
     return o;
   }, [t, params]);
@@ -612,7 +695,7 @@ function BuilderPage({ guest, onAddToCart, onSavePart, disc = (x) => x, discPct 
 
   const pickType = (id) => {
     const nk = typeById(id).kind || "sheet";
-    setTypeId(id); setParams(defaultParams(id)); setMatCode(nk === "sheet" ? "G26" : "TPO-W");
+    setTypeId(id); setParams(defaultParams(id)); setMatCode(nk === "sheet" ? "G26" : "TPO-W"); setDrawMode(false);
   };
   // when a photo is identified, jump the builder to the detected type
   useEffect(() => {
@@ -723,10 +806,23 @@ function BuilderPage({ guest, onAddToCart, onSavePart, disc = (x) => x, discPct 
         )}
       </div>
       <div>
+        {isCustom && (
+          <div className="row" style={{ marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
+            {!drawMode
+              ? <button className="btn btn-p btn-sm" onClick={() => { setParams((pp) => ({ ...pp, segs: [] })); setDrawMode(true); }}>✏️&nbsp;Draw New</button>
+              : <>
+                  <button className="btn btn-o btn-sm" onClick={() => setParams((pp) => ({ ...pp, segs: (pp.segs || []).slice(0, -1) }))}>Undo Point</button>
+                  <button className="btn btn-p btn-sm" onClick={() => setDrawMode(false)}>Finish</button>
+                </>}
+            <span style={{ fontSize: 12, color: "var(--mut)", alignSelf: "center" }}>
+              {drawMode ? "Tap to drop each corner — snaps to 1° & 1/16″. Double-tap or Finish when done." : "Tap a corner to draw, or edit the fields on the left."}
+            </span>
+          </div>
+        )}
         <div className="preview3d">
           {isSheet
             ? (isCustom
-                ? <ProfileDrawing segs={params.segs || []} height={300} />
+                ? <ProfileCanvas segs={params.segs || []} onChange={(segs) => setParams((pp) => ({ ...pp, segs }))} drawMode={drawMode} onFinish={() => setDrawMode(false)} height={300} />
                 : <Flashing3D points={pts} lengthFt={lenFt} materialCode={matCode} height={300} />)
             : <SinglePly3D geo={geo} materialCode={matCode} split={split} height={300} />}
         </div>

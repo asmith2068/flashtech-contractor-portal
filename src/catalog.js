@@ -556,7 +556,8 @@ export const profileBends = (pts) => Math.max(0, pts.length - 2);
 // Screen coords: x right, y down. Positive angle bends downward/clockwise; negative bends the other way.
 export const customProfilePoints = (segs) => {
   const pts = [[0, 0]];
-  let heading = 0, x = 0, y = 0;
+  // First segment's angle is the absolute start heading; later segments' angles are bends.
+  let heading = (segs && segs[0] ? (parseFloat(segs[0].ang) || 0) : 0), x = 0, y = 0;
   (segs || []).forEach((s, i) => {
     const len = Math.max(0, parseFloat(s.len) || 0);
     if (i > 0) heading += (parseFloat(s.ang) || 0);
@@ -571,7 +572,9 @@ export const customProfileStretch = (segs) =>
 export const customProfileDims = (segs) => (segs || []).map((s, i) => {
   const U = String.fromCharCode(65 + i);
   const len = Math.round((parseFloat(s.len) || 0) * 100) / 100;
-  return i === 0 ? `${U}=${len}"` : `${U}=${len}" (${parseFloat(s.ang) || 0}°)`;
+  const ang = parseFloat(s.ang) || 0;
+  if (i === 0) return ang ? `${U}=${len}" @${ang}°` : `${U}=${len}"`;
+  return `${U}=${len}" (${ang}°)`;
 }).join(" · ");
 
 const BEND_CHARGE = 0.5; // $ per bend per piece
