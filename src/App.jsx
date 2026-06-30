@@ -251,6 +251,8 @@ tr.click:hover { background:#f0fdf4; cursor:pointer; }
 .err { background:#fef2f2; color:var(--red); padding:10px 13px; border-radius:0; font-size:13px; margin-bottom:12px; }
 .note { background:#f0fdf4; color:#166534; padding:10px 13px; border-radius:0; font-size:13px; margin-bottom:12px; }
 .banner { display:flex; gap:11px; align-items:flex-start; background:#fef2f2; border:1px solid #fecaca; color:#991b1b; padding:13px 16px; border-radius:0; margin-bottom:18px; font-size:14px; }
+.disclaimer { display:flex; gap:10px; align-items:flex-start; background:#fffbeb; border:1px solid #fde68a; border-left:3px solid var(--amber); color:#92400e; padding:11px 14px; margin-top:12px; font-size:12.5px; line-height:1.45; }
+.disclaimer svg { flex:0 0 auto; width:18px; height:18px; margin-top:1px; }
 /* MOBILE */
 @media (max-width: 860px) {
   .side { width:100%; height:auto; bottom:0; top:auto; flex-direction:row; align-items:center; }
@@ -851,6 +853,12 @@ function BuilderPage({ guest, onAddToCart, onSavePart, disc = (x) => x, discPct 
           <b>Description:</b> {desc}{!isSheet && t.fits ? ` — ${t.fits(vp)}` : ""}
           <div style={{ color: "var(--mut)", fontSize: 12, marginTop: 6 }}>Estimated customer pricing{discPct > 0 ? ` (your ${discPct}% account discount applied)` : ""} — final pricing is confirmed by Flash-Tech on your quote.</div>
         </div>
+        {isSheet && (
+          <div className="disclaimer">
+            {IC.alert}
+            <div><b>Reference only.</b> Not all part geometry can be produced on current sheet-metal folding equipment. The price shown is an estimate for reference — more complex parts may increase the price. Flash-Tech confirms feasibility and final pricing on your quote.</div>
+          </div>
+        )}
       </div>
     </div>
     </>
