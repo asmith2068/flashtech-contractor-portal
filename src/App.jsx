@@ -426,7 +426,7 @@ function ShopPage({ products, onPickCategory, onBuilder, discPct = 0 }) {
     { key: "b-cone", label: "Custom Flashings", sub: "Boots, cones, wraps & scuppers — designed to size", img: coneImg, go: true, badge: "Builder", icon: IC.wrench, onClick: () => onBuilder("conicalBoot") },
     { key: "b-metal", label: "Metal Builder", sub: "Drip edge, coping, gravel stop & more", img: edgeImg, go: true, badge: "Builder", icon: IC.wrench, onClick: () => onBuilder("dripEdge") },
     { key: "b-profile", label: "Profile Builder", sub: "Draw any custom bent profile by hand", svg: <ProfileTileArt />, go: true, badge: "Draw", icon: IC.wrench, onClick: () => onBuilder("customProfile") },
-    { key: "b-cap", label: "Sheet Metal Caps", sub: "4-sided box / pan caps to size", svg: <Pan3D p={{ length: 16, width: 11, height: 4, angle: 14, hem: "raw" }} height={140} showLabels={false} />, go: true, badge: "Builder", icon: IC.wrench, onClick: () => onBuilder("cap") },
+    { key: "b-cap", label: "Sheet Metal Caps", sub: "4-sided box / pan caps to size", svg: <Pan3D p={{ length: 16, width: 11, height: 4, angle: 90, hem: "raw" }} height={140} showLabels={false} />, go: true, badge: "Builder", icon: IC.wrench, onClick: () => onBuilder("cap") },
     { key: "catalog", label: "Full Catalog", sub: "Browse every part & price", img: allImg, go: true, badge: "All Parts", icon: IC.box, onClick: () => onPickCategory("All") },
     { key: "c-" + PIPE, label: PIPE, sub: "Browse catalog", img: catImg(PIPE), onClick: () => onPickCategory(PIPE) },
     ...cats.filter((c) => c !== PIPE).map((c) => ({ key: "c-" + c, label: c, sub: "Browse catalog", img: catImg(c), onClick: () => onPickCategory(c) })),
@@ -688,14 +688,16 @@ function ProfileTileArt() {
 // ─── BOX / PAN CAP: axonometric 3D preview (closed top, 4 sides down) ───
 function Pan3D({ p, height = 300, showLabels = true }) {
   const L = Math.max(0.5, parseFloat(p.length) || 1), W = Math.max(0.5, parseFloat(p.width) || 1), H = Math.max(0.5, parseFloat(p.height) || 1);
-  const ang = (parseFloat(p.angle) || 0) * Math.PI / 180;          // sides splay out from vertical
-  const f = H * Math.sin(ang), v = H * Math.cos(ang);              // horizontal flare, vertical drop
-  const K = 0.5;                                                   // fixed ½" kick (horizontal out-turn)
+  const A0 = Number.isFinite(parseFloat(p.angle)) ? parseFloat(p.angle) : 90; // 90 = straight (vertical)
+  const flare = (90 - A0) * Math.PI / 180;                        // sides splay out from vertical
+  const f = H * Math.sin(flare), v = H * Math.cos(flare);         // horizontal flare, vertical drop
+  const K = 0.5, kr = 45 * Math.PI / 180;                         // fixed ½" kick at 45° (out + down)
+  const kh = K * Math.cos(kr), kv = K * Math.sin(kr);
   const d = 0.5; // depth foreshortening
   const proj = (x, y, z) => [x + y * d, -y * d + z]; // x right, y depth (up-right), z down
   const A = proj(0, 0, 0), B = proj(L, 0, 0), C = proj(L, W, 0), D = proj(0, W, 0);   // top rim
   const Af = proj(-f, -f, v), Bf = proj(L + f, -f, v), Cf = proj(L + f, W + f, v);    // flared side bottoms
-  const Ak = proj(-f - K, -f - K, v), Bk = proj(L + f + K, -f - K, v), Ck = proj(L + f + K, W + f + K, v); // kick lip
+  const Ak = proj(-f - kh, -f - kh, v + kv), Bk = proj(L + f + kh, -f - kh, v + kv), Ck = proj(L + f + kh, W + f + kh, v + kv); // ½" kick @ 45°
   const all = [A, B, C, D, Af, Bf, Cf, Ak, Bk, Ck];
   const xs = all.map((q) => q[0]), ys = all.map((q) => q[1]);
   const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
@@ -725,7 +727,7 @@ function BuilderPage({ guest, onAddToCart, onSavePart, disc = (x) => x, discPct 
   const [matCode, setMatCode] = useState("G26");
   const [params, setParams] = useState(defaultParams("dripEdge"));
   const [lenFt, setLenFt] = useState(10);
-  const [pieces, setPieces] = useState(10);
+  const [pieces, setPieces] = useState(1);
   const [name, setName] = useState("");
   const [saved, setSaved] = useState("");
   const [drawMode, setDrawMode] = useState(false);

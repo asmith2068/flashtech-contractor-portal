@@ -409,14 +409,13 @@ export const FLASHING_TYPES = [
       { key: "length", label: "Length — L (in)", def: 12, min: 2, max: 120 },
       { key: "width", label: "Width — W (in)", def: 24, min: 2, max: 120 },
       { key: "height", label: "Side Height — H (in)", def: 3, min: 0.5, max: 16, step: 0.25 },
-      { key: "angle", label: "Side Angle — out (°)", def: 0, min: 0, max: 60, step: 5 },
+      { key: "angle", label: "Side Angle (°, 90 = straight)", def: 90, min: 45, max: 120, step: 5 },
       { key: "hem", label: "Bottom Edge", type: "choice", def: "hem", options: [
         { value: "hem", label: 'Hemmed edge (½")' },
         { value: "raw", label: "Raw edge" },
       ] },
     ],
-    dims: (p) => `${p.length}"L × ${p.width}"W × ${p.height}"H box cap, ½" kick` +
-      (p.angle > 0 ? `, sides out ${p.angle}°` : "") +
+    dims: (p) => `${p.length}"L × ${p.width}"W × ${p.height}"H box cap, ½" kick @ 45°, sides @ ${p.angle ?? 90}°` +
       (p.hem === "hem" ? ', ½" hemmed edge' : "") + ", hemmed-tab corners",
   },
   {
@@ -597,8 +596,7 @@ export const panPartNumber = (matCode, p) =>
   `FT-CX-CAP-${matCode}-${Math.round(parseFloat(p.length) || 0)}x${Math.round(parseFloat(p.width) || 0)}x${Math.round(parseFloat(p.height) || 0)}`;
 export const panDescription = (matCode, p) => {
   const m = matByCode(matCode);
-  return `Custom Box / Pan Cap — ${m.name}, ${p.length}"L × ${p.width}"W × ${p.height}"H, ½" kick` +
-    (p.angle > 0 ? `, sides out ${p.angle}°` : "") + `, hemmed-tab corners${p.hem === "hem" ? ', ½" hemmed edge' : ""}`;
+  return `Custom Box / Pan Cap — ${m.name}, ${p.length}"L × ${p.width}"W × ${p.height}"H, ½" kick @ 45°, sides @ ${p.angle ?? 90}°, hemmed-tab corners${p.hem === "hem" ? ', ½" hemmed edge' : ""}`;
 };
 
 // ─── DXF export (R12 ASCII, inches) — for the Roper Whitney / brake software ───
