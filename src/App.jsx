@@ -255,6 +255,16 @@ tr.click:hover { background:#f0fdf4; cursor:pointer; }
 .banner { display:flex; gap:11px; align-items:flex-start; background:#fef2f2; border:1px solid #fecaca; color:#991b1b; padding:13px 16px; border-radius:0; margin-bottom:18px; font-size:14px; }
 .disclaimer { display:flex; gap:10px; align-items:flex-start; background:#fffbeb; border:1px solid #fde68a; border-left:3px solid var(--amber); color:#92400e; padding:11px 14px; margin-top:12px; font-size:12.5px; line-height:1.45; }
 .disclaimer svg { flex:0 0 auto; width:18px; height:18px; margin-top:1px; }
+/* HOW-TO DEMO */
+.ht-stage { width:100%; background:linear-gradient(160deg,#f8fafc,#eef2f6); border:1px solid var(--line); display:block; }
+.ht-cap { font-size:15px; font-weight:600; color:var(--ink); text-align:center; min-height:44px; display:flex; align-items:center; justify-content:center; padding:12px 6px 4px; }
+.ht-dots { display:flex; gap:6px; justify-content:center; margin-top:6px; }
+.ht-dots i { width:8px; height:8px; background:var(--line); display:inline-block; cursor:pointer; }
+.ht-dots i.on { background:var(--grn); }
+@keyframes htPing { 0%{ transform:scale(.1); opacity:.6 } 100%{ transform:scale(1); opacity:0 } }
+.ht-ping { transform-box:fill-box; transform-origin:center; animation:htPing .9s ease-out both; }
+.ht-ping2 { animation-delay:.34s; }
+.ht-finger { transition:transform .6s cubic-bezier(.5,.05,.4,1); }
 /* MOBILE */
 @media (max-width: 860px) {
   .side { width:100%; height:auto; bottom:0; top:auto; flex-direction:row; align-items:center; }
@@ -729,6 +739,67 @@ function Pan3D({ p, height = 300, showLabels = true }) {
   );
 }
 
+// ─── PROFILE BUILDER: animated finger-driven how-to demo ───
+function ProfileHowTo({ onClose }) {
+  const PTS = [[70, 60], [190, 60], [190, 120], [214, 141]];
+  const UI = { undo: [92, 170], dim: [90, 211], qty: [208, 211], cart: [294, 211] };
+  const STEPS = [
+    { cap: "Tap once to drop the first corner.", to: PTS[0], tap: 1, pts: 1 },
+    { cap: "Tap the next corner — a line follows your finger.", to: PTS[1], tap: 1, pts: 2 },
+    { cap: "Keep tapping to add each bend.", to: PTS[2], tap: 1, pts: 3 },
+    { cap: "…and the last corner.", to: PTS[3], tap: 1, pts: 4 },
+    { cap: "Made a mistake? Tap “Undo Point” to remove the last one.", to: UI.undo, tap: 1, pts: 3, hi: "undo" },
+    { cap: "Then just tap the corner again.", to: PTS[3], tap: 1, pts: 4 },
+    { cap: "Double-tap the last point to finish.", to: PTS[3], tap: 2, pts: 4, done: true },
+    { cap: "Tap any dimension to set an exact size.", to: UI.dim, tap: 1, pts: 4, done: true, hi: "dim" },
+    { cap: "Type the exact measurement — e.g. 3½″.", to: UI.dim, tap: 0, pts: 4, done: true, hi: "dim", dim: '3½"' },
+    { cap: "Set how many pieces you need.", to: UI.qty, tap: 1, pts: 4, done: true, dim: '3½"', qty: 25, hi: "qty" },
+    { cap: "Tap “Add to Cart” — all done! 🎉", to: UI.cart, tap: 1, pts: 4, done: true, dim: '3½"', qty: 25, hi: "cart" },
+  ];
+  const N = STEPS.length;
+  const [step, setStep] = useState(0);
+  const [playing, setPlaying] = useState(true);
+  useEffect(() => {
+    if (!playing || step >= N - 1) return;
+    const id = setTimeout(() => setStep((x) => Math.min(N - 1, x + 1)), 2500);
+    return () => clearTimeout(id);
+  }, [step, playing]); // eslint-disable-line
+  const s = STEPS[step];
+  const dimVal = s.dim || '3"', qtyVal = s.qty || 1;
+  const poly = PTS.slice(0, s.pts).map((q) => q.join(",")).join(" ");
+  const box = (x0, y0, x1, y1, on) => ({ x: x0, y: y0, width: x1 - x0, height: y1 - y0, fill: on ? "#dcfce7" : "#fff", stroke: on ? "#0DD714" : "#cbd5e1", strokeWidth: on ? 2 : 1 });
+  return (
+    <Modal title="How to Draw a Custom Profile" onClose={onClose}
+      footer={<>
+        <button className="btn btn-o btn-sm" onClick={() => { setStep(0); setPlaying(true); }}>↻ Replay</button>
+        <button className="btn btn-p btn-sm" onClick={onClose}>Got it</button>
+      </>}>
+      <svg viewBox="0 0 340 244" className="ht-stage" style={{ height: 300 }}>
+        <rect x="14" y="12" width="312" height="140" fill="#fff" stroke="#e2e8f0" />
+        {Array.from({ length: 17 }, (_, i) => 14 + i * 20).filter((x) => x <= 326).map((x) => <line key={"gx" + x} x1={x} y1="12" x2={x} y2="152" stroke="#eef2f6" strokeWidth="1" />)}
+        {Array.from({ length: 8 }, (_, i) => 12 + i * 20).filter((y) => y <= 152).map((y) => <line key={"gy" + y} x1="14" y1={y} x2="326" y2={y} stroke="#eef2f6" strokeWidth="1" />)}
+        <polyline points={poly} fill="none" stroke="#0DD714" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />
+        {PTS.slice(0, s.pts).map((q, i) => <circle key={"p" + i} cx={q[0]} cy={q[1]} r="3.5" fill="#0b0d0b" />)}
+        <rect {...box(30, 158, 154, 182, s.hi === "undo")} />
+        <text x="92" y="174" fontSize="12" textAnchor="middle" fontWeight="700" fill="#0b0d0b" style={{ fontFamily: "Oswald, sans-serif" }}>UNDO POINT</text>
+        <rect {...box(30, 194, 150, 228, s.hi === "dim")} />
+        <text x="90" y="215" fontSize="14" textAnchor="middle" fontWeight="700" fill="#0b0d0b">A = {dimVal}</text>
+        <rect {...box(164, 194, 252, 228, s.hi === "qty")} />
+        <text x="208" y="215" fontSize="14" textAnchor="middle" fontWeight="700" fill="#0b0d0b">Qty: {qtyVal}</text>
+        <rect x="262" y="194" width="64" height="34" fill={s.hi === "cart" ? "#0DD714" : "#0aa810"} stroke="#0b0d0b" strokeWidth={s.hi === "cart" ? 2 : 0.5} />
+        <text x="294" y="215" fontSize="12" textAnchor="middle" fontWeight="800" fill="#04210a">CART</text>
+        {s.tap > 0 && <circle key={"pg" + step} className="ht-ping" cx={s.to[0]} cy={s.to[1]} r="14" fill="none" stroke="#0DD714" strokeWidth="2.5" />}
+        {s.tap === 2 && <circle key={"pg2" + step} className="ht-ping ht-ping2" cx={s.to[0]} cy={s.to[1]} r="14" fill="none" stroke="#0DD714" strokeWidth="2.5" />}
+        <g className="ht-finger" style={{ transform: `translate(${s.to[0]}px, ${s.to[1]}px)` }}>
+          <text x="-9" y="27" fontSize="30">👆</text>
+        </g>
+      </svg>
+      <div className="ht-cap">{s.cap}</div>
+      <div className="ht-dots">{STEPS.map((_, i) => <i key={i} className={i <= step ? "on" : ""} onClick={() => { setStep(i); setPlaying(false); }} />)}</div>
+    </Modal>
+  );
+}
+
 // ─── CUSTOM FLASHING BUILDER ─────────────────────────────────
 function BuilderPage({ guest, onAddToCart, onSavePart, disc = (x) => x, discPct = 0, detectInfo = null, detectNonce = 0, seedType = null, seedNonce = 0 }) {
   const [typeId, setTypeId] = useState("dripEdge");
@@ -740,6 +811,8 @@ function BuilderPage({ guest, onAddToCart, onSavePart, disc = (x) => x, discPct 
   const [saved, setSaved] = useState("");
   const [drawMode, setDrawMode] = useState(false);
   const [drawSpan, setDrawSpan] = useState(10); // canvas size in inches (zoom); smaller = easier small segments
+  const [showDemo, setShowDemo] = useState(false);
+  const [howToSeen, setHowToSeen] = useState(false);
 
   const t = typeById(typeId);
   const isSheet = (t.kind || "sheet") === "sheet";
@@ -789,6 +862,7 @@ function BuilderPage({ guest, onAddToCart, onSavePart, disc = (x) => x, discPct 
   const pickType = (id) => {
     const nk = typeById(id).kind || "sheet";
     setTypeId(id); setParams(defaultParams(id)); setMatCode(nk === "sheet" ? "G26" : "TPO-W"); setDrawMode(false);
+    if (id === "customProfile") setHowToSeen(false); // offer the how-to each time the profile builder is opened
   };
   // when a photo is identified, jump the builder to the detected type
   useEffect(() => {
@@ -817,6 +891,14 @@ function BuilderPage({ guest, onAddToCart, onSavePart, disc = (x) => x, discPct 
         {IC.camera}&nbsp;From your photo, this looks like a <b>{detectInfo.label}</b> <span style={{ color: "var(--mut)" }}>({detectInfo.confidence} confidence)</span>{detectInfo.note ? ` — ${detectInfo.note}` : ""}. Confirm the type below and enter the sizes (change it if it's not right).
       </div>
     )}
+    {isCustom && !howToSeen && (
+      <div className="note" style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 14 }}>
+        <span style={{ flex: 1, minWidth: 190 }}>👆 New to the Profile Builder? Watch a quick how-to first.</span>
+        <button className="btn btn-p btn-sm" onClick={() => { setShowDemo(true); setHowToSeen(true); }}>Watch How-To</button>
+        <button className="btn btn-o btn-sm" onClick={() => setHowToSeen(true)}>Skip</button>
+      </div>
+    )}
+    {showDemo && <ProfileHowTo onClose={() => setShowDemo(false)} />}
     <div className="builder">
       <div className="card">
         <div className="fld"><label>Flashing Type</label>
@@ -911,6 +993,7 @@ function BuilderPage({ guest, onAddToCart, onSavePart, disc = (x) => x, discPct 
         {isCustom && (
           <div className="row" style={{ marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
             {!drawMode && <button className="btn btn-p btn-sm" onClick={() => { setParams((pp) => ({ ...pp, segs: [] })); setDrawMode(true); }}>✏️&nbsp;Draw New</button>}
+            <button className="btn btn-o btn-sm" onClick={() => setShowDemo(true)}>❔&nbsp;How-To</button>
             {(params.segs || []).length > 0 && <button className="btn btn-o btn-sm" onClick={() => setParams((pp) => ({ ...pp, segs: (pp.segs || []).slice(0, -1) }))}>Undo Point</button>}
             {drawMode && <button className="btn btn-p btn-sm" onClick={() => setDrawMode(false)}>Finish</button>}
             {drawMode && (
