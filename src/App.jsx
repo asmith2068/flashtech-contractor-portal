@@ -556,6 +556,7 @@ const fmtIn = (v) => {                                     // 3.0625 -> 3 1/16"
 // ─── CUSTOM PROFILE: drawable 2D cross-section (mouse / touch) ───
 function ProfileCanvas({ segs, onChange, drawMode = false, onFinish = () => {}, span = 10, color = "#0DD714", height = 300 }) {
   const svgRef = useRef(null);
+  const lastDownRef = useRef(null);            // for double-tap-to-finish detection
   const [start, setStart] = useState(null);   // inch-space anchor of the first vertex
   const [cursor, setCursor] = useState(null); // inch-space cursor while drawing
   useEffect(() => { if (drawMode) { setStart(null); setCursor(null); } }, [drawMode]);
@@ -581,6 +582,13 @@ function ProfileCanvas({ segs, onChange, drawMode = false, onFinish = () => {}, 
     if (!drawMode) return;
     e.preventDefault();
     const ip = toInch(e); if (!ip) return;
+    // double-tap/click = finish (the previous click's point is the last vertex; don't drop an extra point)
+    const now = (typeof performance !== "undefined" && performance.now) ? performance.now() : Date.now();
+    const ld = lastDownRef.current;
+    if (ld && now - ld.t < 400 && Math.hypot(ip.x - ld.x, ip.y - ld.y) < 0.75) {
+      lastDownRef.current = null; setCursor(null); onFinish(); return;
+    }
+    lastDownRef.current = { t: now, x: ip.x, y: ip.y };
     if (!start) { setStart(ip); setCursor(ip); return; }
     if (segs.length >= 11) return;
     const { len, absAng } = calcSeg(ip);
@@ -631,7 +639,7 @@ function ProfileCanvas({ segs, onChange, drawMode = false, onFinish = () => {}, 
 
   return (
     <svg ref={svgRef} viewBox={vb} width="100%" height={height}
-      onPointerDown={onDown} onPointerMove={onMove} onDoubleClick={() => drawMode && onFinish()}
+      onPointerDown={onDown} onPointerMove={onMove} onPointerLeave={() => setCursor(null)}
       style={{ display: "block", touchAction: "none", cursor: drawMode ? "crosshair" : "default" }}>
       {grid}
       {drawMode && start && <circle cx={start.x} cy={start.y} r={lw * 1.6} fill="#0b0d0b" />}
@@ -902,18 +910,17 @@ function BuilderPage({ guest, onAddToCart, onSavePart, disc = (x) => x, discPct 
       <div>
         {isCustom && (
           <div className="row" style={{ marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
-            {!drawMode
-              ? <button className="btn btn-p btn-sm" onClick={() => { setParams((pp) => ({ ...pp, segs: [] })); setDrawMode(true); }}>✏️&nbsp;Draw New</button>
-              : <>
-                  <button className="btn btn-o btn-sm" onClick={() => setParams((pp) => ({ ...pp, segs: (pp.segs || []).slice(0, -1) }))}>Undo Point</button>
-                  <button className="btn btn-p btn-sm" onClick={() => setDrawMode(false)}>Finish</button>
-                  <span className="zoomctl">
-                    <button className="btn btn-o btn-sm" title="Zoom in (smaller canvas, easier small bends)" onClick={() => setDrawSpan((s) => Math.max(4, s - 3))}>＋</button>
-                    <button className="btn btn-o btn-sm" title="Zoom out" onClick={() => setDrawSpan((s) => Math.min(30, s + 3))}>－</button>
-                  </span>
-                </>}
+            {!drawMode && <button className="btn btn-p btn-sm" onClick={() => { setParams((pp) => ({ ...pp, segs: [] })); setDrawMode(true); }}>✏️&nbsp;Draw New</button>}
+            {(params.segs || []).length > 0 && <button className="btn btn-o btn-sm" onClick={() => setParams((pp) => ({ ...pp, segs: (pp.segs || []).slice(0, -1) }))}>Undo Point</button>}
+            {drawMode && <button className="btn btn-p btn-sm" onClick={() => setDrawMode(false)}>Finish</button>}
+            {drawMode && (
+              <span className="zoomctl">
+                <button className="btn btn-o btn-sm" title="Zoom in (smaller canvas, easier small bends)" onClick={() => setDrawSpan((s) => Math.max(4, s - 3))}>＋</button>
+                <button className="btn btn-o btn-sm" title="Zoom out" onClick={() => setDrawSpan((s) => Math.min(30, s + 3))}>－</button>
+              </span>
+            )}
             <span style={{ fontSize: 12, color: "var(--mut)", alignSelf: "center" }}>
-              {drawMode ? `Tap to drop each corner — snaps to 1° & 1/16″. Canvas ≈ ${drawSpan}″.` : "Tap a corner to draw, or edit the fields on the left."}
+              {drawMode ? `Tap each corner — double-tap to finish. Snaps to 1° & 1/16″. Canvas ≈ ${drawSpan}″.` : "Undo removes the last point, or edit the fields on the left."}
             </span>
           </div>
         )}
