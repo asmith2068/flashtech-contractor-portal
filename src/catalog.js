@@ -514,7 +514,7 @@ export const SCUPPER_TIERS = [
 export const scupperSides = (w, h) => Math.round(2 * (w + h) * 100) / 100;
 export const scupperTier = (sides) => SCUPPER_TIERS.find((t) => sides <= t.max) || SCUPPER_TIERS[SCUPPER_TIERS.length - 1];
 const isPVCmat = (matCode) => (anyMat(matCode).typeName || "TPO").startsWith("PVC");
-export const scupperPrice = (geo, matCode) => { const t = scupperTier(scupperSides(geo.w, geo.h)); return isPVCmat(matCode) ? t.pvc : t.tpo; };
+export const scupperPrice = (geo, matCode) => { const t = scupperTier(scupperSides(geo.w, geo.h)); return Math.round((isPVCmat(matCode) ? t.pvc : t.tpo) * BUILDER_MARKUP * 100) / 100; };
 export const scupperPartNumber = (matCode, geo) => scupperTier(scupperSides(geo.w, geo.h)).sku + (isPVCmat(matCode) ? "PVC" : "TPO");
 
 // ─── Geometry & pricing ───
@@ -553,11 +553,14 @@ export const customProfileDims = (segs) => (segs || []).map((s, i) => {
 
 const BEND_CHARGE = 0.5; // $ per bend per piece
 const MIN_PIECE = 14; // shop minimum per piece
+// Across-the-board markup on ALL custom-builder prices (sheet profiles, custom profile,
+// membrane flashings, scuppers, box/pan caps). 1.20 = +20%. Change this one number to adjust.
+export const BUILDER_MARKUP = 1.20;
 
 export const piecePrice = (girth, bends, lengthFt, matCode) => {
   const m = matByCode(matCode);
   const raw = girth * m.rate * lengthFt + bends * BEND_CHARGE;
-  return Math.round(Math.max(MIN_PIECE, raw) * 100) / 100;
+  return Math.round(Math.max(MIN_PIECE, raw) * BUILDER_MARKUP * 100) / 100;
 };
 
 export const customPartNumber = (typeId, matCode, girth) => {
@@ -590,7 +593,7 @@ export const panPrice = (p, matCode) => {
   const blankArea = (L + 2 * S) * (W + 2 * S);
   const usd = PAN_BASE + PAN_AREA * blankArea;
   const mult = (matByCode(matCode).rate || 0.26) / (matByCode("G26").rate || 0.26);
-  return Math.round(Math.max(MIN_PIECE, usd * mult) * 100) / 100;
+  return Math.round(Math.max(MIN_PIECE, usd * mult) * BUILDER_MARKUP * 100) / 100;
 };
 export const panPartNumber = (matCode, p) =>
   `FT-CX-CAP-${matCode}-${Math.round(parseFloat(p.length) || 0)}x${Math.round(parseFloat(p.width) || 0)}x${Math.round(parseFloat(p.height) || 0)}`;
@@ -652,7 +655,7 @@ export const membranePrice = (geo, matCode, split, mil = 60) => {
     raw = MEMBRANE_BASE + geo.botR * 2 * 1.7 + geo.height * 0.9 + (split ? 5 : 0);
   }
   if (geo.tilt) raw += 8; // mitered fabrication surcharge
-  return Math.round(Math.max(MEMBRANE_MIN, raw) * (m.rate || 1) * (MIL_FACTOR[mil] || 1) * 100) / 100;
+  return Math.round(Math.max(MEMBRANE_MIN, raw) * (m.rate || 1) * (MIL_FACTOR[mil] || 1) * BUILDER_MARKUP * 100) / 100;
 };
 export const membranePartNumber = (typeId, matCode, geo, split) => {
   const t = typeById(typeId);
