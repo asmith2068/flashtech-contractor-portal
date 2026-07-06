@@ -1469,7 +1469,22 @@ export default function App() {
   const [selReq, setSelReq] = useState(null);
   const [busy, setBusy] = useState(false);
   const [dbError, setDbError] = useState(false);
+  const [dbDown, setDbDown] = useState(false); // hosting/database outage -> show maintenance notice
   const [toast, setToast] = useState("");
+  // Health check: detect a database outage and show a friendly maintenance banner (auto-clears when back).
+  useEffect(() => {
+    if (!hasSupabase) return;
+    let alive = true;
+    const check = async () => {
+      try {
+        const { error } = await supabase.from("portal_products").select("sku").limit(1);
+        if (alive) setDbDown(!!error);
+      } catch { if (alive) setDbDown(true); }
+    };
+    check();
+    const iv = setInterval(check, 15000);
+    return () => { alive = false; clearInterval(iv); };
+  }, []);
   // camera / AI photo identify
   const cameraRef = useRef(null);
   const [camBusy, setCamBusy] = useState(false);
@@ -1705,6 +1720,13 @@ export default function App() {
 
   const openRequest = (r) => { setSelReq(r.id); setPage("requests"); if (!isAdmin) markSeen(r.id); };
 
+  // Maintenance banner shown during a hosting/database outage (auto-hides when service is restored).
+  const maintBanner = dbDown ? (
+    <div style={{ position: "fixed", top: 0, left: 0, right: 0, zIndex: 9999, background: "#0b0d0b", color: "#fff", borderBottom: "3px solid #0DD714", padding: "12px 18px", textAlign: "center", fontFamily: "'Barlow',Arial,sans-serif", fontSize: 14.5, lineHeight: 1.45, boxShadow: "0 4px 14px rgba(0,0,0,.3)" }}>
+      🔧 <b style={{ color: "#0DD714" }}>We'll be right back.</b>&nbsp; The portal is briefly offline for maintenance with our hosting provider. Please check back in a little while — thanks for your patience!
+    </div>
+  ) : null;
+
   // ─── render ───
   if (resetToken && !session) {
     return (<><style>{CSS}</style><ResetPassword token={resetToken} onDone={() => { try { window.history.replaceState({}, "", window.location.pathname); } catch (e) {} setResetToken(null); }} /></>);
@@ -1723,7 +1745,7 @@ export default function App() {
       </>
     );
   }
-  if (!session) return (<><style>{CSS}</style><LoginScreen onLogin={login} onGuest={() => setGuest(true)} dbError={dbError} /></>);
+  if (!session) return (<><style>{CSS}</style>{maintBanner}<LoginScreen onLogin={login} onGuest={() => setGuest(true)} dbError={dbError} /></>);
 
   const nav = isAdmin
     ? [["dashboard", "Dashboard", IC.home], ["requests", "Requests", IC.list], ["customers", "Customers", IC.users], ["catalog", "Catalog", IC.box]]
@@ -1744,6 +1766,7 @@ export default function App() {
   return (
     <>
       <style>{CSS}</style>
+      {maintBanner}
       <div className="app">
         <aside className="side">
           <div className="logo"><b>FLASH-<span>TECH</span></b><small>Contractor Portal</small></div>
