@@ -376,7 +376,8 @@ function LoginScreen({ onLogin, onGuest, dbError }) {
   return (
     <div className="login">
       <div className="lbox">
-        <h1>Flash-Tech <span>Contractor Portal</span></h1>
+        <img src="/ft-logo.png" alt="Flash-Tech Mfg, Inc." style={{ width: "100%", maxWidth: 340, display: "block", margin: "0 auto 2px" }} />
+        <div style={{ fontFamily: "'Oswald',sans-serif", textTransform: "uppercase", letterSpacing: ".08em", fontSize: 13, color: "var(--grn-d)", fontWeight: 600, marginBottom: 6 }}>Contractor Portal</div>
         <div style={{ color: "var(--mut)", fontSize: 14 }}>Quotes, orders & custom flashings — Flash-Tech Mfg, Inc.</div>
         {dbError && <div className="err" style={{ marginTop: 14 }}>Heads up: the portal database tables weren't found. Run <b>database-setup.sql</b> in your Supabase SQL editor first.</div>}
         <div className="tabs">
@@ -1803,7 +1804,7 @@ export default function App() {
       {maintBanner}
       <div className="app">
         <aside className="side">
-          <div className="logo"><b>FLASH-<span>TECH</span></b><small>Contractor Portal</small></div>
+          <div className="logo"><img src="/ft-logo.png" alt="Flash-Tech Mfg, Inc." style={{ width: "100%", display: "block" }} /><small style={{ marginTop: 6 }}>Contractor Portal</small></div>
           <nav>
             {nav.map(([id, label, icon]) => (
               <button key={id} className={page === id ? "on" : ""} onClick={() => { setPage(id); setSelReq(null); }}>
