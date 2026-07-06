@@ -803,7 +803,7 @@ function ProfileHowTo({ onClose }) {
 }
 
 // ─── CUSTOM FLASHING BUILDER ─────────────────────────────────
-function BuilderPage({ guest, onAddToCart, onSavePart, disc = (x) => x, discPct = 0, detectInfo = null, detectNonce = 0, seedType = null, seedNonce = 0 }) {
+function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc = (x) => x, discPct = 0, detectInfo = null, detectNonce = 0, seedType = null, seedNonce = 0 }) {
   const [typeId, setTypeId] = useState("dripEdge");
   const [matCode, setMatCode] = useState("G26");
   const [params, setParams] = useState(defaultParams("dripEdge"));
@@ -978,9 +978,14 @@ function BuilderPage({ guest, onAddToCart, onSavePart, disc = (x) => x, discPct 
             <input type="number" min="1" value={pieces} onChange={(e) => setPieces(Math.max(1, parseInt(e.target.value) || 1))} />
           </div>
         )}
-        <div className="fld"><label>Save As (optional)</label><input value={name} onChange={(e) => setName(e.target.value)} placeholder='e.g. "Smith job 4&quot; vents"' /></div>
+        {!reference && <div className="fld"><label>Save As (optional)</label><input value={name} onChange={(e) => setName(e.target.value)} placeholder='e.g. "Smith job 4&quot; vents"' /></div>}
         {guest ? (
           <div className="note">Create a free account to add this part to a quote or order request.</div>
+        ) : reference ? (
+          <>
+            <div className="note" style={{ marginBottom: 10 }}>Reference tool — build a part to see its part number, price &amp; 3D model. Final pricing is confirmed on the customer's quote.</div>
+            {isSheet && <button className="btn btn-o" style={{ width: "100%", justifyContent: "center" }} onClick={() => downloadDXF(`${partNo}.dxf`, partDXF(typeId, vp))}>{IC.print}&nbsp;Download DXF{isPan ? " (flat blank)" : " (profile)"}</button>}
+          </>
         ) : (
           <>
             {saved && <div className="note">{saved}</div>}
@@ -1777,7 +1782,7 @@ export default function App() {
   if (!session) return (<><style>{CSS}</style>{maintBanner}<LoginScreen onLogin={login} onGuest={() => setGuest(true)} dbError={dbError} /></>);
 
   const nav = isAdmin
-    ? [["dashboard", "Dashboard", IC.home], ["requests", "Requests", IC.list], ["customers", "Customers", IC.users], ["catalog", "Catalog", IC.box]]
+    ? [["dashboard", "Dashboard", IC.home], ["requests", "Requests", IC.list], ["customers", "Customers", IC.users], ["catalog", "Catalog", IC.box], ["builder", "Custom Builder", IC.wrench]]
     : [["shop", "Home", IC.home], ["catalog", "Parts Catalog", IC.box], ["builder", "Custom Flashing", IC.wrench], ["cart", "Cart / Send Request", IC.cart], ["requests", "My Requests", IC.list], ["parts", "My Saved Parts", IC.bookmark]];
 
   const titles = {
@@ -1833,6 +1838,7 @@ export default function App() {
           {page === "shop" && !isAdmin && <ShopPage products={products} discPct={discPct} onPickCategory={openCategory} onBuilder={openBuilder} />}
           {page === "catalog" && isAdmin && <CatalogPage products={products} readOnly />}
           {page === "catalog" && !isAdmin && <CatalogPage products={products} onAdd={addProduct} disc={applyDisc} discPct={discPct} seedCat={catSeed.cat} seedNonce={catSeed.nonce} />}
+          {page === "builder" && isAdmin && <BuilderPage reference guest={false} onAddToCart={() => {}} onSavePart={() => {}} />}
           {page === "builder" && !isAdmin && <BuilderPage guest={false} onAddToCart={addCustom} onSavePart={savePart} disc={applyDisc} discPct={discPct} detectInfo={camResult} detectNonce={camNonce} seedType={bSeed.type} seedNonce={bSeed.nonce} />}
           {page === "cart" && !isAdmin && <CartPage cart={cart} onRemove={(k) => setCart((c) => c.filter((i) => i.key !== k))} onClear={() => setCart([])} onSubmit={submitRequest} busy={busy} user={session} />}
           {page === "parts" && !isAdmin && <MyPartsPage parts={parts} onAdd={addCustom} onDel={delPart} disc={applyDisc} discPct={discPct} />}
