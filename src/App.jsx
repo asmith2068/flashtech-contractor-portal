@@ -1145,7 +1145,7 @@ function CartPage({ cart, onRemove, onClear, onSubmit, busy, user }) {
 }
 
 // ─── REQUEST DETAIL (shared contractor/admin) ────────────────
-function RequestDetail({ req, items, msgs, role, contractor, user, onBack, onSend, onStatus, onQuoteTotal }) {
+function RequestDetail({ req, items, msgs, role, contractor, user, onBack, onSend, onStatus, onQuoteTotal, onDelete }) {
   const [body, setBody] = useState("");
   const [quote, setQuote] = useState(req.admin_quote_total || "");
   const myItems = items.filter((i) => i.request_id === req.id);
@@ -1231,6 +1231,11 @@ function RequestDetail({ req, items, msgs, role, contractor, user, onBack, onSen
                   </div>
                 </div>
               </div>
+              {onDelete && (
+                <div className="row" style={{ marginTop: 12, justifyContent: "flex-end" }}>
+                  <button className="btn btn-d btn-sm" onClick={() => onDelete(req)}>{IC.trash}&nbsp;Delete Request</button>
+                </div>
+              )}
             </div>
           )}
           <div className="card">
@@ -1255,7 +1260,7 @@ function RequestDetail({ req, items, msgs, role, contractor, user, onBack, onSen
 }
 
 // ─── REQUEST LIST (shared) ───────────────────────────────────
-function RequestList({ requests, msgs, role, contractorsById, onOpen }) {
+function RequestList({ requests, msgs, role, contractorsById, onOpen, onStatus, onDelete }) {
   const [fStatus, setFStatus] = useState("all");
   const [fType, setFType] = useState("all");
   const list = requests.filter((r) => (fStatus === "all" || r.status === fStatus) && (fType === "all" || r.req_type === fType));
@@ -1283,10 +1288,17 @@ function RequestList({ requests, msgs, role, contractorsById, onOpen }) {
                   {role === "admin" && <td>{contractorsById[r.contractor_id]?.company || "—"}</td>}
                   <td>{r.job_name || "—"}</td>
                   <td><TypeBadge t={r.req_type} /></td>
-                  <td><StatusBadge s={r.status} /></td>
+                  <td>{role === "admin"
+                    ? <select value={r.status} onClick={(e) => e.stopPropagation()} onChange={(e) => { e.stopPropagation(); onStatus(r, e.target.value); }} style={{ width: 130, padding: "5px 8px" }}>
+                        {Object.entries(STATUS_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                      </select>
+                    : <StatusBadge s={r.status} />}</td>
                   <td>{fmt(r.admin_quote_total ?? r.subtotal)}</td>
                   <td style={{ whiteSpace: "nowrap" }}>{fmtDate(r.created_at)}</td>
-                  {role === "admin" && <td>{late && <span className="b b-late">Waiting {Math.floor(hoursSince(waitingSince(r, msgs)) / 24)}d+</span>}</td>}
+                  {role === "admin" && <td onClick={(e) => e.stopPropagation()} style={{ whiteSpace: "nowrap", textAlign: "right" }}>
+                    {late && <span className="b b-late" style={{ marginRight: 8 }}>Waiting {Math.floor(hoursSince(waitingSince(r, msgs)) / 24)}d+</span>}
+                    <button className="btn btn-d btn-sm" title="Delete request" onClick={() => onDelete(r)}>{IC.trash}</button>
+                  </td>}
                 </tr>
               );
             })}
@@ -1676,6 +1688,21 @@ export default function App() {
       emailShell("Your quote is ready", `<p>Flash-Tech has quoted your request${req.job_name ? ` for <b>${req.job_name}</b>` : ""}:</p><p style="font-size:24px;color:#0aa810;font-weight:bold">${fmt(total)}</p>${mailBtn("View Quote", PORTAL_URL)}`),
       NOTIFY_EMAIL);
   };
+  // admin: permanently delete a request (and its line items + messages)
+  const deleteRequest = async (req) => {
+    if (!window.confirm(`Delete this ${req.req_type} request${req.job_name ? ` for "${req.job_name}"` : ` #${req.id.slice(0, 8)}`}? This can't be undone.`)) return;
+    try {
+      await supabase.from("portal_messages").delete().eq("request_id", req.id);
+      await supabase.from("portal_request_items").delete().eq("request_id", req.id);
+      const { error } = await supabase.from("portal_requests").delete().eq("id", req.id);
+      if (error) throw error;
+    } catch (e) { alert("Could not delete: " + e.message); return; }
+    setRequests((rs) => rs.filter((r) => r.id !== req.id));
+    setItems((it) => it.filter((i) => i.request_id !== req.id));
+    setMsgs((m) => m.filter((x) => x.request_id !== req.id));
+    if (selReq === req.id) setSelReq(null);
+    flash("Request deleted.");
+  };
 
   // ── admin: manage contractor accounts ──
   const saveContractor = async (id, fields, newPassword) => {
@@ -1812,9 +1839,9 @@ export default function App() {
           {page === "requests" && (curReq ? (
             <RequestDetail req={curReq} items={items} msgs={msgs} role={role}
               contractor={isAdmin ? contractorsById[curReq.contractor_id] : null} user={session}
-              onBack={() => setSelReq(null)} onSend={sendMsg} onStatus={setStatus} onQuoteTotal={setQuoteTotal} />
+              onBack={() => setSelReq(null)} onSend={sendMsg} onStatus={setStatus} onQuoteTotal={setQuoteTotal} onDelete={isAdmin ? deleteRequest : null} />
           ) : (
-            <RequestList requests={requests} msgs={msgs} role={role} contractorsById={contractorsById} onOpen={openRequest} />
+            <RequestList requests={requests} msgs={msgs} role={role} contractorsById={contractorsById} onOpen={openRequest} onStatus={setStatus} onDelete={deleteRequest} />
           ))}
         </main>
       </div>
