@@ -3,7 +3,7 @@ import { supabase, hasSupabase } from "./supabaseClient.js";
 import Flashing3D from "./Flashing3D.jsx";
 import SinglePly3D from "./SinglePly3D.jsx";
 import {
-  SEED_PRODUCTS, MATERIALS, COATED_METALS, MEMBRANE_TYPES, MEMBRANE_COLORS, matByCode, anyMat, FLASHING_TYPES, typeById,
+  SEED_PRODUCTS, MATERIALS, COATED_METALS, KYNAR_METALS, KYNAR_COLORS, MEMBRANE_TYPES, MEMBRANE_COLORS, matByCode, anyMat, FLASHING_TYPES, typeById,
   profileGirth, profileBends, piecePrice, customPartNumber, customDescription, defaultParams,
   membranePrice, membranePartNumber, membraneDescription,
   scupperPrice, scupperPartNumber, scupperSides, scupperTier, productImage, POPULAR_SKUS,
@@ -917,16 +917,25 @@ function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc =
         {isSheet ? (
           <>
             <div className="fld"><label>Material</label>
-              <select value={matType} onChange={(e) => { const v = e.target.value; setMatCode(COATED_METALS.some((m) => m.code === v) ? `${v}-${matColor}` : v); }}>
+              <select value={matType} onChange={(e) => {
+                const v = e.target.value;
+                if (KYNAR_METALS.some((m) => m.code === v)) setMatCode(`${v}-${KYNAR_COLORS.some((c) => c.code === matColor) ? matColor : "RW"}`);
+                else if (COATED_METALS.some((m) => m.code === v)) setMatCode(`${v}-${MEMBRANE_COLORS.some((c) => c.code === matColor) ? matColor : "W"}`);
+                else setMatCode(v);
+              }}>
                 <optgroup label="Bare Metal">{MATERIALS.map((m) => <option key={m.code} value={m.code}>{m.name}</option>)}</optgroup>
                 <optgroup label="Coated Metal (heat-weldable)">{COATED_METALS.map((m) => <option key={m.code} value={m.code}>{m.name}</option>)}</optgroup>
+                <optgroup label="Kynar (PVDF) Painted">{KYNAR_METALS.map((m) => <option key={m.code} value={m.code}>{m.name}</option>)}</optgroup>
               </select>
             </div>
-            {matCode.includes("-") && (
-              <div className="fld"><label>Color</label>
-                <select value={matColor} onChange={(e) => setMatCode(`${matType}-${e.target.value}`)}>{MEMBRANE_COLORS.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}</select>
-              </div>
-            )}
+            {matCode.includes("-") && (() => {
+              const colors = KYNAR_METALS.some((m) => m.code === matType) ? KYNAR_COLORS : MEMBRANE_COLORS;
+              return (
+                <div className="fld"><label>Color</label>
+                  <select value={matColor} onChange={(e) => setMatCode(`${matType}-${e.target.value}`)}>{colors.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}</select>
+                </div>
+              );
+            })()}
           </>
         ) : (
           <>

@@ -256,15 +256,38 @@ export const COATED_METALS = [
   { code: "PVCC", name: "PVC-Coated Metal", rate: 0.46 },
 ];
 
-// All composite (type-color) codes share one resolver. Membrane rates are
-// price multipliers; coated-metal rates are $/girth-inch/ft like bare metals.
-const COMPOSITE_TYPES = [...MEMBRANE_TYPES, ...COATED_METALS];
+// Kynar (PVDF) factory-painted sheet metal — comes in colors. rate = $/girth-inch/ft (estimated).
+export const KYNAR_METALS = [
+  { code: "KYN24", name: "24ga Kynar", rate: 0.55 },
+  { code: "KYN22", name: "22ga Kynar", rate: 0.70 },
+];
+// Standard Kynar 500 / PVDF architectural color palette (hsl values are for the 3D preview).
+export const KYNAR_COLORS = [
+  { code: "RW", name: "Regal White", hue: 210, sat: 5, lum: 92 },
+  { code: "BW", name: "Bone White", hue: 44, sat: 16, lum: 88 },
+  { code: "ST", name: "Sandstone", hue: 36, sat: 22, lum: 74 },
+  { code: "SR", name: "Sierra Tan", hue: 30, sat: 28, lum: 62 },
+  { code: "AG", name: "Ash Gray", hue: 210, sat: 4, lum: 66 },
+  { code: "SG", name: "Slate Gray", hue: 210, sat: 8, lum: 46 },
+  { code: "CG", name: "Charcoal Gray", hue: 210, sat: 6, lum: 30 },
+  { code: "MB", name: "Medium Bronze", hue: 30, sat: 20, lum: 30 },
+  { code: "DB", name: "Dark Bronze", hue: 28, sat: 24, lum: 18 },
+  { code: "HG", name: "Hartford Green", hue: 150, sat: 30, lum: 22 },
+  { code: "RB", name: "Regal Blue", hue: 214, sat: 45, lum: 30 },
+  { code: "CR", name: "Colonial Red", hue: 6, sat: 52, lum: 34 },
+  { code: "BLK", name: "Matte Black", hue: 0, sat: 0, lum: 14 },
+];
 
-// Resolve a composite code ("TPO-G", "TPOC-W", or legacy "TPOG") to a render/price style.
+// All composite (type-color) codes share one resolver. Membrane rates are
+// price multipliers; coated-metal / Kynar rates are $/girth-inch/ft like bare metals.
+const COMPOSITE_TYPES = [...MEMBRANE_TYPES, ...COATED_METALS, ...KYNAR_METALS];
+const ALL_COLORS = [...MEMBRANE_COLORS, ...KYNAR_COLORS];
+
+// Resolve a composite code ("TPO-G", "TPOC-W", "KYN24-SG", or legacy "TPOG") to a render/price style.
 export const membraneStyle = (code = "TPO-W") => {
   const [typeCode, colorCode] = code.includes("-") ? code.split("-") : [code.slice(0, 3), code.slice(3)];
   const tp = COMPOSITE_TYPES.find((t) => t.code === typeCode) || MEMBRANE_TYPES[0];
-  const c = MEMBRANE_COLORS.find((x) => x.code === colorCode) || MEMBRANE_COLORS[0];
+  const c = ALL_COLORS.find((x) => x.code === colorCode) || MEMBRANE_COLORS[0];
   return { code, hue: c.hue, sat: c.sat, lum: c.lum, rate: tp.rate, typeName: tp.name, colorName: c.name, name: `${tp.name} ${c.name}` };
 };
 
