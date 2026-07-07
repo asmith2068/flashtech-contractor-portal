@@ -576,7 +576,7 @@ export const customPartNumber = (typeId, matCode, girth) => {
 export const customDescription = (typeId, matCode, params, lengthFt, girth) => {
   const t = typeById(typeId);
   const m = matByCode(matCode);
-  const girthLabel = t.custom ? `${girth}" stretch-out` : `${girth}" girth`;
+  const girthLabel = `${girth}" stretch-out`;
   return `${t.custom ? "" : "Custom "}${t.name} — ${m.name}, ${t.dims(params)}, ${girthLabel}, ${lengthFt}'-0" lengths`;
 };
 

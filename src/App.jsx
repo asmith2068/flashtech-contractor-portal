@@ -1032,7 +1032,7 @@ function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc =
             <div><span>Each</span><b>{fmt(disc(perPiece))}</b></div>
             <div><span>{pieces} each</span><b>{fmt(disc(total))}</b></div>
           </>) : isSheet ? (<>
-            <div><span>{isCustom ? "Stretch-Out" : "Girth"}</span><b>{girth}"</b></div>
+            <div><span>Stretch-Out</span><b>{girth}"</b></div>
             <div><span>Bends</span><b>{bends}</b></div>
             <div><span>Per Piece ({effLen}')</span><b>{fmt(disc(perPiece))}</b></div>
             <div><span>Per Lin. Ft</span><b>{fmt(disc(perLF))}</b></div>
