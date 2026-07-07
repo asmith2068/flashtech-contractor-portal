@@ -1359,10 +1359,15 @@ function AdminDashboard({ requests, msgs, contractorsById, onOpen }) {
   );
 }
 
-function AdminCustomers({ contractors, requests, onSave, onDelete }) {
+function AdminCustomers({ contractors, requests, onSave, onDelete, onCreate }) {
   const [edit, setEdit] = useState(null);
+  const [adding, setAdding] = useState(false);
   return (
     <div className="card">
+      <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+        <b>{contractors.length} contractor{contractors.length === 1 ? "" : "s"}</b>
+        <button className="btn btn-p btn-sm" onClick={() => setAdding(true)}>{IC.plus}&nbsp;Add Contractor</button>
+      </div>
       <table><thead><tr><th>Company</th><th>Contact</th><th>Login</th><th>Phone</th><th>Distributor</th><th>Sales Rep</th><th>Disc %</th><th>Requests</th><th></th></tr></thead>
         <tbody>
           {contractors.map((c) => (
@@ -1378,30 +1383,35 @@ function AdminCustomers({ contractors, requests, onSave, onDelete }) {
         </tbody>
       </table>
       {edit && <ContractorForm contractor={edit} onClose={() => setEdit(null)} onSave={onSave} onDelete={onDelete} />}
+      {adding && <ContractorForm contractor={null} onClose={() => setAdding(false)} onCreate={onCreate} />}
     </div>
   );
 }
 
-function ContractorForm({ contractor, onClose, onSave, onDelete }) {
-  const [f, setF] = useState({ name: contractor.name || "", company: contractor.company || "", email: contractor.email || "", phone: contractor.phone || "", distributor: contractor.distributor || "", sales_rep: contractor.sales_rep || "", discount_pct: contractor.discount_pct || 0 });
+function ContractorForm({ contractor, onClose, onSave, onDelete, onCreate }) {
+  const isNew = !contractor;
+  const c = contractor || {};
+  const [f, setF] = useState({ name: c.name || "", company: c.company || "", email: c.email || "", phone: c.phone || "", distributor: c.distributor || "", sales_rep: c.sales_rep || "", discount_pct: c.discount_pct || 0 });
   const [pw, setPw] = useState("");
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const save = async () => {
     if (!f.name.trim() || !f.email.trim()) { alert("Name and login/email are required."); return; }
-    if (pw && pw.length < 4) { alert("New password must be at least 4 characters."); return; }
+    if (isNew && pw.length < 4) { alert("Set a temporary password (at least 4 characters) for the contractor."); return; }
+    if (!isNew && pw && pw.length < 4) { alert("New password must be at least 4 characters."); return; }
     const dpct = Math.max(0, Math.min(100, Number(f.discount_pct) || 0));
+    const fields = { name: f.name, company: f.company, email: f.email.trim().toLowerCase(), phone: f.phone, distributor: f.distributor, sales_rep: f.sales_rep, discount_pct: dpct };
     setBusy(true);
-    const ok = await onSave(contractor.id, { name: f.name, company: f.company, email: f.email.trim().toLowerCase(), phone: f.phone, distributor: f.distributor, sales_rep: f.sales_rep, discount_pct: dpct }, pw || null);
+    const ok = isNew ? await onCreate(fields, pw) : await onSave(contractor.id, fields, pw || null);
     setBusy(false);
     if (ok) onClose();
   };
   return (
-    <Modal title={`Edit ${contractor.company || contractor.name}`} onClose={onClose}
+    <Modal title={isNew ? "Add Contractor" : `Edit ${contractor.company || contractor.name}`} onClose={onClose}
       footer={<>
-        <button className="btn btn-d" onClick={() => { if (confirm(`Delete ${contractor.name}'s account? This cannot be undone.`)) { onDelete(contractor.id); onClose(); } }}>{IC.trash}&nbsp;Delete</button>
+        {!isNew && <button className="btn btn-d" onClick={() => { if (confirm(`Delete ${contractor.name}'s account? This cannot be undone.`)) { onDelete(contractor.id); onClose(); } }}>{IC.trash}&nbsp;Delete</button>}
         <button className="btn btn-o" onClick={onClose}>Cancel</button>
-        <button className="btn btn-p" disabled={busy} onClick={save}>{busy ? "Saving..." : "Save Changes"}</button>
+        <button className="btn btn-p" disabled={busy} onClick={save}>{busy ? "Saving..." : (isNew ? "Add Contractor" : "Save Changes")}</button>
       </>}>
       <div className="g2">
         <div className="fld"><label>Contact Name</label><input value={f.name} onChange={set("name")} /></div>
@@ -1421,9 +1431,9 @@ function ContractorForm({ contractor, onClose, onSave, onDelete }) {
         <div style={{ fontSize: 12, color: "var(--mut)", marginTop: 4 }}>This % comes off every price this contractor sees — catalog, builder, and their requests. Set by purchase level.</div>
       </div>
       <div className="fld">
-        <label>Reset Password</label>
-        <input value={pw} onChange={(e) => setPw(e.target.value)} placeholder="Type a new password to reset it (leave blank to keep current)" />
-        <div style={{ fontSize: 12, color: "var(--mut)", marginTop: 4 }}>Set a temporary password here and share it with the customer if they're locked out.</div>
+        <label>{isNew ? "Temporary Password" : "Reset Password"}</label>
+        <input value={pw} onChange={(e) => setPw(e.target.value)} placeholder={isNew ? "Set a temporary password for the contractor" : "Type a new password to reset it (leave blank to keep current)"} />
+        <div style={{ fontSize: 12, color: "var(--mut)", marginTop: 4 }}>{isNew ? "Give this to the contractor so they can log in — they can change it later." : "Set a temporary password here and share it with the customer if they're locked out."}</div>
       </div>
     </Modal>
   );
@@ -1711,6 +1721,14 @@ export default function App() {
   };
 
   // ── admin: manage contractor accounts ──
+  const createContractor = async (fields, password) => {
+    const row = { ...fields, password_hash: await sha256(password), role: "contractor" };
+    const { error } = await supabase.from("portal_users").insert(row);
+    if (error) { alert(error.code === "23505" ? "That login/email is already in use." : "Could not add contractor: " + error.message); return false; }
+    await loadAll(session);
+    flash("Contractor account added.");
+    return true;
+  };
   const saveContractor = async (id, fields, newPassword) => {
     const patch = { ...fields };
     if (newPassword) patch.password_hash = await sha256(newPassword);
@@ -1835,7 +1853,7 @@ export default function App() {
           {dbError && <div className="banner">{IC.alert}<div><b>Database tables not found.</b> Run database-setup.sql in your Supabase SQL editor, then reload.</div></div>}
 
           {page === "dashboard" && isAdmin && <AdminDashboard requests={requests} msgs={msgs} contractorsById={contractorsById} onOpen={openRequest} />}
-          {page === "customers" && isAdmin && <AdminCustomers contractors={contractors} requests={requests} onSave={saveContractor} onDelete={deleteContractor} />}
+          {page === "customers" && isAdmin && <AdminCustomers contractors={contractors} requests={requests} onSave={saveContractor} onDelete={deleteContractor} onCreate={createContractor} />}
           {page === "shop" && !isAdmin && <ShopPage products={products} discPct={discPct} onPickCategory={openCategory} onBuilder={openBuilder} />}
           {page === "catalog" && isAdmin && <CatalogPage products={products} readOnly />}
           {page === "catalog" && !isAdmin && <CatalogPage products={products} onAdd={addProduct} disc={applyDisc} discPct={discPct} seedCat={catSeed.cat} seedNonce={catSeed.nonce} />}
