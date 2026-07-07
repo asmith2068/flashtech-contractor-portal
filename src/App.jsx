@@ -1099,11 +1099,21 @@ function MyPartsPage({ parts, onAdd, onDel, disc = (x) => x }) {
 }
 
 // ─── CART / SUBMIT REQUEST ───────────────────────────────────
+const MEMBRANE_MFRS = ["Carlisle SynTec", "Elevate (Firestone)", "GAF", "Johns Manville", "Versico", "Mule-Hide", "IB Roof Systems", "Sika Sarnafil", "FiberTite", "Other / not sure", "N/A — metal only"];
 function CartPage({ cart, onRemove, onClear, onSubmit, busy, user }) {
-  const [meta, setMeta] = useState({ req_type: "quote", job_name: "", po_number: "", needed_by: "", notes: "" });
+  const [meta, setMeta] = useState({ req_type: "quote", job_name: "", po_number: "", needed_by: "", membrane_mfr: "", metal_color: "", notes: "" });
   const subtotal = cart.reduce((s, i) => s + i.line_total, 0);
   const set = (k) => (e) => setMeta({ ...meta, [k]: e.target.value });
   const doPrint = () => printQuote({ kind: meta.req_type, billTo: user, meta, items: cart, subtotal });
+  const submit = () => {
+    if (!meta.membrane_mfr) { alert("Please choose the TPO/PVC membrane manufacturer for your order (select “N/A — metal only” if it's all sheet metal)."); return; }
+    const spec = [
+      `Membrane manufacturer: ${meta.membrane_mfr}`,
+      meta.metal_color.trim() ? `Metal / Kynar color: ${meta.metal_color.trim()}` : null,
+    ].filter(Boolean).join("\n");
+    const notes = [spec, meta.notes.trim()].filter(Boolean).join("\n\n");
+    onSubmit({ ...meta, notes }, subtotal);
+  };
   if (!cart.length) return <div className="card" style={{ color: "var(--mut)" }}>Your cart is empty — add parts from the Catalog or the Custom Flashing Builder.</div>;
   return (
     <div className="g2" style={{ gridTemplateColumns: "1.4fr 1fr", alignItems: "start" }}>
@@ -1141,8 +1151,19 @@ function CartPage({ cart, onRemove, onClear, onSubmit, busy, user }) {
           <div className="fld"><label>PO # (optional)</label><input value={meta.po_number} onChange={set("po_number")} /></div>
           <div className="fld"><label>Needed By</label><input type="date" value={meta.needed_by} onChange={set("needed_by")} /></div>
         </div>
-        <div className="fld"><label>Notes</label><textarea rows="3" value={meta.notes} onChange={set("notes")} placeholder="Delivery instructions, colors, etc." /></div>
-        <button className="btn btn-p" style={{ width: "100%", justifyContent: "center" }} disabled={busy} onClick={() => onSubmit(meta, subtotal)}>
+        <div className="fld"><label>Membrane Manufacturer <span style={{ color: "var(--red)" }}>*</span></label>
+          <select value={meta.membrane_mfr} onChange={set("membrane_mfr")}>
+            <option value="">Select the TPO / PVC brand…</option>
+            {MEMBRANE_MFRS.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+          <div style={{ fontSize: 12, color: "var(--mut)", marginTop: 4 }}>Which TPO/PVC membrane your order should be made to match. Required.</div>
+        </div>
+        <div className="fld"><label>Kynar / Coping Metal Color</label>
+          <input value={meta.metal_color} onChange={set("metal_color")} placeholder="e.g. Slate Gray, Regal Blue" />
+          <div style={{ fontSize: 12, color: "var(--mut)", marginTop: 4 }}>If your order includes Kynar-finish or coping metal, enter the color here.</div>
+        </div>
+        <div className="fld"><label>Notes</label><textarea rows="3" value={meta.notes} onChange={set("notes")} placeholder="Delivery instructions, etc." /></div>
+        <button className="btn btn-p" style={{ width: "100%", justifyContent: "center" }} disabled={busy} onClick={submit}>
           {IC.send}&nbsp;{busy ? "Sending..." : `Send ${meta.req_type === "quote" ? "Quote" : "Order"} Request to Flash-Tech`}
         </button>
       </div>

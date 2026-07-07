@@ -334,6 +334,7 @@ export const FLASHING_TYPES = [
       { key: "kick", label: "Kick-Out (in)", def: 0.75, min: 0.25, max: 2, step: 0.25 },
       { key: "kickAngle", label: "Kick Angle (°)", def: 45, min: 15, max: 75, step: 5 },
       { key: "edge", label: "Bottom Edge", type: "choice", def: "kick", options: [{ value: "kick", label: "Kick only" }, { value: "hemkick", label: "Hem + Kick" }] },
+      { key: "cleat", label: "Cleat", type: "choice", def: "full", options: [{ value: "full", label: "Full-length cleat" }, { value: "segmented", label: "Segmented cleats" }, { value: "none", label: "No cleat" }] },
     ],
     points: (p) => {
       const slope = 0.6; // top slopes for drainage
@@ -352,7 +353,8 @@ export const FLASHING_TYPES = [
       if (hem) pts.push([bKick[0] - hl, bKick[1]]);
       return pts;
     },
-    dims: (p) => `${p.width}" wall, ${p.front}"/${p.back}" faces, ${p.kick ?? 0.75}" kick-out @ ${p.kickAngle ?? 45}°${p.edge === "hemkick" ? ", hemmed" : ""}`,
+    dims: (p) => `${p.width}" wall, ${p.front}"/${p.back}" faces, ${p.kick ?? 0.75}" kick-out @ ${p.kickAngle ?? 45}°${p.edge === "hemkick" ? ", hemmed" : ""}` +
+      (p.cleat === "segmented" ? ", segmented cleats" : p.cleat === "none" ? "" : ", full-length cleat"),
   },
   {
     id: "gravelStop",
