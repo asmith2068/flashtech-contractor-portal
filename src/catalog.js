@@ -308,15 +308,32 @@ export const FLASHING_TYPES = [
     fields: [
       { key: "flange", label: 'Deck Flange (in)', def: 3, min: 1, max: 12 },
       { key: "face", label: 'Face (in)', def: 2, min: 1, max: 12 },
-      { key: "kick", label: 'Kick / Hem (in)', def: 0.75, min: 0, max: 3, step: 0.25 },
+      { key: "kick", label: 'Kick-Out (in)', def: 0.75, min: 0, max: 3, step: 0.25 },
       { key: "kickAngle", label: "Kick Angle (°)", def: 35, min: 0, max: 75, step: 5 },
+      { key: "edge", label: "Bottom Edge", type: "choice", def: "kick", options: [
+        { value: "kick", label: "Kick only" },
+        { value: "hemkick", label: "Hem + Kick" },
+        { value: "hem", label: "Hem only" },
+        { value: "raw", label: "Plain (no kick / hem)" },
+      ] },
     ],
     points: (p) => {
       const pts = [[p.flange, 0], [0, 0], [0, p.face]];
-      if (p.kick > 0) pts.push([-Math.sin(rad(p.kickAngle)) * p.kick, p.face + Math.cos(rad(p.kickAngle)) * p.kick]);
+      const edge = p.edge || "kick";
+      const useKick = (edge === "kick" || edge === "hemkick") && p.kick > 0;
+      const useHem = edge === "hem" || edge === "hemkick";
+      const hl = 0.5; // hemmed return length
+      let bottom = [0, p.face];
+      if (useKick) { bottom = [-Math.sin(rad(p.kickAngle)) * p.kick, p.face + Math.cos(rad(p.kickAngle)) * p.kick]; pts.push(bottom); }
+      if (useHem) pts.push([bottom[0] + hl, bottom[1]]);
       return pts;
     },
-    dims: (p) => `${p.flange}" flange x ${p.face}" face` + (p.kick > 0 ? `, ${p.kick}" kick @ ${p.kickAngle}°` : ""),
+    dims: (p) => {
+      const edge = p.edge || "kick";
+      const kickTxt = (edge === "kick" || edge === "hemkick") && p.kick > 0 ? `, ${p.kick}" kick @ ${p.kickAngle}°` : "";
+      const hemTxt = edge === "hem" || edge === "hemkick" ? ", hemmed edge" : "";
+      return `${p.flange}" flange x ${p.face}" face${kickTxt}${hemTxt}`;
+    },
   },
   {
     id: "lFlashing",
