@@ -1222,13 +1222,23 @@ function CartPage({ cart, onRemove, onClear, onSubmit, busy, user }) {
 }
 
 // ─── REQUEST DETAIL (shared contractor/admin) ────────────────
-function RequestDetail({ req, items, msgs, role, contractor, user, onBack, onSend, onStatus, onQuoteTotal, onDelete }) {
+function RequestDetail({ req, items, msgs, role, contractor, user, onBack, onSend, onStatus, onQuoteTotal, onDelete, onSaveQuote }) {
   const [body, setBody] = useState("");
   const [quote, setQuote] = useState(req.admin_quote_total || "");
   const myItems = items.filter((i) => i.request_id === req.id);
   const thread = msgs.filter((m) => m.request_id === req.id);
   const doPrint = () => printQuote({ kind: req.req_type, reqId: req.id, created: req.created_at, status: STATUS_META[req.status]?.label,
     billTo: contractor || user, meta: req, items: myItems, subtotal: req.subtotal, quotedTotal: req.admin_quote_total });
+  // ── admin quote editor: change prices/qty, add/remove line items, add custom lines ──
+  const [editing, setEditing] = useState(false);
+  const [rows, setRows] = useState([]);
+  const [newItem, setNewItem] = useState({ description: "", qty: 1, unit_price: "" });
+  const startEdit = () => { setRows(myItems.map((i) => ({ ...i }))); setNewItem({ description: "", qty: 1, unit_price: "" }); setEditing(true); };
+  const upd = (idx, field, val) => setRows((rs) => rs.map((r, i) => (i === idx ? { ...r, [field]: val } : r)));
+  const removeRow = (idx) => setRows((rs) => rs.filter((_, i) => i !== idx));
+  const addLine = () => { if (!newItem.description.trim()) return; setRows((rs) => [...rs, { key: uid(), item_kind: "custom", sku: null, unit: "ea", description: newItem.description.trim(), qty: parseFloat(newItem.qty) || 1, unit_price: parseFloat(newItem.unit_price) || 0 }]); setNewItem({ description: "", qty: 1, unit_price: "" }); };
+  const liveTotal = rows.reduce((s, r) => s + (parseFloat(r.qty) || 0) * (parseFloat(r.unit_price) || 0), 0);
+  const saveEdit = async () => { const ok = await onSaveQuote(req, rows); if (ok !== false) setEditing(false); };
   return (
     <div>
       <div className="row" style={{ marginBottom: 14, justifyContent: "space-between" }}>
@@ -1247,7 +1257,37 @@ function RequestDetail({ req, items, msgs, role, contractor, user, onBack, onSen
             {req.po_number && <> · PO {req.po_number}</>}
             {req.needed_by && <> · Needed by {fmtDate(req.needed_by)}</>}
           </div>
-          {req.notes && <div className="note">{req.notes}</div>}
+          {req.notes && <div className="note" style={{ whiteSpace: "pre-line" }}>{req.notes}</div>}
+          {role === "admin" && !editing && <div className="row" style={{ marginBottom: 10 }}><button className="btn btn-p btn-sm" onClick={startEdit}>✏️&nbsp;Edit Quote / Pricing</button></div>}
+          {editing ? (
+            <>
+              <table><thead><tr><th>Description</th><th style={{ width: 58 }}>Qty</th><th style={{ width: 92 }}>Unit $</th><th>Total</th><th style={{ width: 34 }}></th></tr></thead>
+                <tbody>
+                  {rows.map((r, idx) => (
+                    <tr key={r.id || r.key}>
+                      <td>{r.sku && <div style={{ fontWeight: 700, fontSize: 12 }}>{r.sku}</div>}<input value={r.description} onChange={(e) => upd(idx, "description", e.target.value)} style={{ width: "100%", fontSize: 13, padding: "6px 8px" }} /></td>
+                      <td><input type="number" min="0" step="0.5" value={r.qty} onChange={(e) => upd(idx, "qty", e.target.value)} style={{ padding: "6px 6px" }} /></td>
+                      <td><input type="number" min="0" step="0.01" value={r.unit_price} onChange={(e) => upd(idx, "unit_price", e.target.value)} style={{ padding: "6px 6px" }} /></td>
+                      <td style={{ whiteSpace: "nowrap", fontWeight: 600 }}>{fmt((parseFloat(r.qty) || 0) * (parseFloat(r.unit_price) || 0))}</td>
+                      <td><button className="btn btn-d btn-sm" title="Remove item" onClick={() => removeRow(idx)}>{IC.trash}</button></td>
+                    </tr>
+                  ))}
+                  <tr style={{ background: "#f0fdf4" }}>
+                    <td><input placeholder="+ Custom line (freight, labor, etc.)" value={newItem.description} onChange={(e) => setNewItem({ ...newItem, description: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter") addLine(); }} style={{ width: "100%", fontSize: 13, padding: "6px 8px" }} /></td>
+                    <td><input type="number" min="0" step="0.5" value={newItem.qty} onChange={(e) => setNewItem({ ...newItem, qty: e.target.value })} style={{ padding: "6px 6px" }} /></td>
+                    <td><input type="number" min="0" step="0.01" placeholder="0.00" value={newItem.unit_price} onChange={(e) => setNewItem({ ...newItem, unit_price: e.target.value })} style={{ padding: "6px 6px" }} /></td>
+                    <td></td>
+                    <td><button className="btn btn-p btn-sm" title="Add line item" onClick={addLine} disabled={!newItem.description.trim()}>{IC.plus}</button></td>
+                  </tr>
+                  <tr><td colSpan="3" style={{ textAlign: "right", fontWeight: 700, color: "var(--grn)" }}>Quoted Total</td><td style={{ fontWeight: 800, color: "var(--grn)" }}>{fmt(liveTotal)}</td><td></td></tr>
+                </tbody>
+              </table>
+              <div className="row" style={{ marginTop: 12 }}>
+                <button className="btn btn-p grow" style={{ justifyContent: "center" }} onClick={saveEdit}>{IC.send}&nbsp;Save &amp; Send Quote</button>
+                <button className="btn btn-o" onClick={() => setEditing(false)}>Cancel</button>
+              </div>
+            </>
+          ) : (
           <table><thead><tr><th>Part</th><th>Qty</th><th>Price</th><th>Total</th></tr></thead>
             <tbody>
               {myItems.map((i) => (
@@ -1291,6 +1331,7 @@ function RequestDetail({ req, items, msgs, role, contractor, user, onBack, onSen
               )}
             </tbody>
           </table>
+          )}
         </div>
         <div>
           {role === "admin" && (
@@ -1814,6 +1855,56 @@ export default function App() {
       emailShell("Your quote is ready", `<p>Flash-Tech has quoted your request${req.job_name ? ` for <b>${req.job_name}</b>` : ""}:</p><p style="font-size:24px;color:#0aa810;font-weight:bold">${fmt(total)}</p>${mailBtn("View Quote", PORTAL_URL)}`),
       NOTIFY_EMAIL);
   };
+  // admin: edit the quote line-by-line (change prices/qty, add/remove items, add custom
+  // lines), persist the changes, set the quoted total, and email the customer back.
+  const saveQuote = async (req, editRows) => {
+    const orig = items.filter((i) => i.request_id === req.id);
+    // normalize + recompute line totals
+    const rows = editRows.map((r) => {
+      const qty = Math.max(0, parseFloat(r.qty) || 0);
+      const unit_price = Math.max(0, parseFloat(r.unit_price) || 0);
+      return { ...r, qty, unit_price, line_total: Math.round(qty * unit_price * 100) / 100 };
+    });
+    const total = Math.round(rows.reduce((s, r) => s + r.line_total, 0) * 100) / 100;
+    try {
+      // delete rows the admin removed
+      const keepIds = rows.filter((r) => r.id).map((r) => r.id);
+      const toDelete = orig.filter((o) => !keepIds.includes(o.id)).map((o) => o.id);
+      if (toDelete.length) {
+        const { error } = await supabase.from("portal_request_items").delete().in("id", toDelete);
+        if (error) throw error;
+      }
+      // update existing rows
+      for (const r of rows.filter((r) => r.id)) {
+        const { error } = await supabase.from("portal_request_items")
+          .update({ description: r.description, qty: r.qty, unit_price: r.unit_price, line_total: r.line_total })
+          .eq("id", r.id);
+        if (error) throw error;
+      }
+      // insert new custom lines the admin added
+      const inserts = rows.filter((r) => !r.id).map((r) => ({
+        request_id: req.id, item_kind: r.item_kind || "custom", sku: r.sku || null,
+        description: r.description, unit: r.unit || "ea", qty: r.qty, unit_price: r.unit_price,
+        line_total: r.line_total, detail: r.detail || null,
+      }));
+      if (inserts.length) {
+        const { error } = await supabase.from("portal_request_items").insert(inserts);
+        if (error) throw error;
+      }
+      // update the request: quoted total + mark responded
+      const { error } = await supabase.from("portal_requests")
+        .update({ admin_quote_total: total, status: "responded", updated_at: new Date().toISOString() })
+        .eq("id", req.id);
+      if (error) throw error;
+    } catch (e) { alert("Could not save the quote: " + e.message); return false; }
+    await loadAll(session);
+    flash("Quote saved & sent to the customer.");
+    const c = contractorsById[req.contractor_id];
+    if (c?.email) sendMail(c.email, `Flash-Tech sent you a quote — ${fmt(total)}`,
+      emailShell("Your quote is ready", `<p>Flash-Tech has reviewed your request${req.job_name ? ` for <b>${req.job_name}</b>` : ""} and prepared a quote:</p><p style="font-size:24px;color:#0aa810;font-weight:bold">${fmt(total)}</p><p>Sign in to view the itemized quote and reply with any questions.</p>${mailBtn("View Quote", PORTAL_URL)}`),
+      NOTIFY_EMAIL);
+    return true;
+  };
   // admin: permanently delete a request (and its line items + messages)
   const deleteRequest = async (req) => {
     if (!window.confirm(`Delete this ${req.req_type} request${req.job_name ? ` for "${req.job_name}"` : ` #${req.id.slice(0, 8)}`}? This can't be undone.`)) return;
@@ -1985,7 +2076,7 @@ export default function App() {
           {page === "requests" && (curReq ? (
             <RequestDetail req={curReq} items={items} msgs={msgs} role={role}
               contractor={isAdmin ? contractorsById[curReq.contractor_id] : null} user={session}
-              onBack={() => setSelReq(null)} onSend={sendMsg} onStatus={setStatus} onQuoteTotal={setQuoteTotal} onDelete={isAdmin ? deleteRequest : null} />
+              onBack={() => setSelReq(null)} onSend={sendMsg} onStatus={setStatus} onQuoteTotal={setQuoteTotal} onDelete={isAdmin ? deleteRequest : null} onSaveQuote={isAdmin ? saveQuote : null} />
           ) : (
             <RequestList requests={requests} msgs={msgs} role={role} contractorsById={contractorsById} onOpen={openRequest} onStatus={setStatus} onDelete={deleteRequest} />
           ))}
