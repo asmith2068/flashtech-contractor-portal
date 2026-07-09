@@ -131,6 +131,14 @@ const STATUS_META = {
   responded: { label: "Responded", cls: "b-resp" },
   closed: { label: "Closed", cls: "b-closed" },
 };
+// QuickBooks push state (per order). The Web Connector pulls "queued" orders,
+// creates Sales Orders, then flips them to "pushed" (or "error").
+const QB_META = {
+  none: { label: "Not sent to QuickBooks", c: "var(--mut)" },
+  queued: { label: "Queued for QuickBooks", c: "var(--amber)" },
+  pushed: { label: "Pushed to QuickBooks", c: "var(--grn-d)" },
+  error: { label: "QuickBooks error", c: "var(--red)" },
+};
 const REMIND_HOURS = 24; // flag requests unanswered longer than this
 
 // A request still needs a Flash-Tech response if it's new, or the last
@@ -1222,9 +1230,11 @@ function CartPage({ cart, onRemove, onClear, onSubmit, busy, user }) {
 }
 
 // ─── REQUEST DETAIL (shared contractor/admin) ────────────────
-function RequestDetail({ req, items, msgs, role, contractor, user, onBack, onSend, onStatus, onQuoteTotal, onDelete, onSaveQuote }) {
+function RequestDetail({ req, items, msgs, role, contractor, user, onBack, onSend, onStatus, onQuoteTotal, onDelete, onSaveQuote, onQbQueue }) {
   const [body, setBody] = useState("");
   const [quote, setQuote] = useState(req.admin_quote_total || "");
+  const qbStatus = req.qb_status || "none";
+  const qb = QB_META[qbStatus] || QB_META.none;
   const myItems = items.filter((i) => i.request_id === req.id);
   const thread = msgs.filter((m) => m.request_id === req.id);
   const doPrint = () => printQuote({ kind: req.req_type, reqId: req.id, created: req.created_at, status: STATUS_META[req.status]?.label,
@@ -1349,6 +1359,30 @@ function RequestDetail({ req, items, msgs, role, contractor, user, onBack, onSen
                   </div>
                 </div>
               </div>
+              {onQbQueue && (
+                <div style={{ marginTop: 14, borderTop: "1px solid var(--line)", paddingTop: 12 }}>
+                  <label style={{ display: "block", fontSize: 12, color: "var(--mut)", marginBottom: 6, fontWeight: 700 }}>QuickBooks</label>
+                  {req.req_type !== "order" ? (
+                    <small style={{ color: "var(--mut)" }}>Only orders push to QuickBooks. Set the type to “order” to send it as a Sales Order.</small>
+                  ) : (
+                    <>
+                      <div className="row" style={{ gap: 8, marginBottom: 8, alignItems: "center" }}>
+                        <span style={{ fontWeight: 700, color: qb.c }}>● {qb.label}</span>
+                        {req.qb_ref_number && <span style={{ color: "var(--mut)", fontSize: 12 }}>· SO #{req.qb_ref_number}</span>}
+                        {req.qb_pushed_at && <span style={{ color: "var(--mut)", fontSize: 12 }}>· {fmtDateTime(req.qb_pushed_at)}</span>}
+                      </div>
+                      {req.qb_error && <div className="note" style={{ color: "var(--red)", marginBottom: 8, whiteSpace: "pre-line" }}>{req.qb_error}</div>}
+                      {qbStatus === "queued" ? (
+                        <button className="btn btn-o btn-sm" onClick={() => onQbQueue(req, false)}>Remove from queue</button>
+                      ) : qbStatus === "pushed" ? (
+                        <button className="btn btn-o btn-sm" onClick={() => onQbQueue(req, true)}>Re-send to QuickBooks</button>
+                      ) : (
+                        <button className="btn btn-p btn-sm" onClick={() => onQbQueue(req, true)}>Send to QuickBooks</button>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
               {onDelete && (
                 <div className="row" style={{ marginTop: 12, justifyContent: "flex-end" }}>
                   <button className="btn btn-d btn-sm" onClick={() => onDelete(req)}>{IC.trash}&nbsp;Delete Request</button>
@@ -1395,7 +1429,7 @@ function RequestList({ requests, msgs, role, contractorsById, onOpen, onStatus, 
       </div>
       <div style={{ overflowX: "auto" }}>
         <table><thead><tr>
-          <th>Req #</th>{role === "admin" && <th>Customer</th>}<th>Job</th><th>Type</th><th>Status</th><th>Est. Total</th><th>Submitted</th>{role === "admin" && <th></th>}
+          <th>Req #</th>{role === "admin" && <th>Customer</th>}<th>Job</th><th>Type</th><th>Status</th><th>Est. Total</th>{role === "admin" && <th>QB</th>}<th>Submitted</th>{role === "admin" && <th></th>}
         </tr></thead>
           <tbody>
             {list.map((r) => {
@@ -1412,6 +1446,9 @@ function RequestList({ requests, msgs, role, contractorsById, onOpen, onStatus, 
                       </select>
                     : <StatusBadge s={r.status} />}</td>
                   <td>{fmt(r.admin_quote_total ?? r.subtotal)}</td>
+                  {role === "admin" && <td style={{ whiteSpace: "nowrap" }}>{r.req_type === "order"
+                    ? <span title={QB_META[r.qb_status || "none"].label} style={{ color: QB_META[r.qb_status || "none"].c, fontWeight: 700, fontSize: 12 }}>● {{ none: "—", queued: "Queued", pushed: "Pushed", error: "Error" }[r.qb_status || "none"]}</span>
+                    : <span style={{ color: "var(--mut)" }}>—</span>}</td>}
                   <td style={{ whiteSpace: "nowrap" }}>{fmtDate(r.created_at)}</td>
                   {role === "admin" && <td onClick={(e) => e.stopPropagation()} style={{ whiteSpace: "nowrap", textAlign: "right" }}>
                     {late && <span className="b b-late" style={{ marginRight: 8 }}>Waiting {Math.floor(hoursSince(waitingSince(r, msgs)) / 24)}d+</span>}
@@ -1905,6 +1942,16 @@ export default function App() {
       NOTIFY_EMAIL);
     return true;
   };
+  // admin: queue / unqueue an order for the QuickBooks Web Connector to pick up.
+  // Nothing is sent to QuickBooks here — this only flags the order as ready. The
+  // Web Connector pulls "queued" orders on its schedule and flips them to pushed.
+  const setQbQueue = async (req, queued) => {
+    const patch = queued ? { qb_status: "queued", qb_error: null } : { qb_status: "none" };
+    const { error } = await supabase.from("portal_requests").update(patch).eq("id", req.id);
+    if (error) { alert("Could not update QuickBooks status: " + error.message); return; }
+    setRequests((rs) => rs.map((r) => (r.id === req.id ? { ...r, ...patch } : r)));
+    flash(queued ? "Order queued for QuickBooks." : "Removed from the QuickBooks queue.");
+  };
   // admin: permanently delete a request (and its line items + messages)
   const deleteRequest = async (req) => {
     if (!window.confirm(`Delete this ${req.req_type} request${req.job_name ? ` for "${req.job_name}"` : ` #${req.id.slice(0, 8)}`}? This can't be undone.`)) return;
@@ -2076,7 +2123,7 @@ export default function App() {
           {page === "requests" && (curReq ? (
             <RequestDetail req={curReq} items={items} msgs={msgs} role={role}
               contractor={isAdmin ? contractorsById[curReq.contractor_id] : null} user={session}
-              onBack={() => setSelReq(null)} onSend={sendMsg} onStatus={setStatus} onQuoteTotal={setQuoteTotal} onDelete={isAdmin ? deleteRequest : null} onSaveQuote={isAdmin ? saveQuote : null} />
+              onBack={() => setSelReq(null)} onSend={sendMsg} onStatus={setStatus} onQuoteTotal={setQuoteTotal} onDelete={isAdmin ? deleteRequest : null} onSaveQuote={isAdmin ? saveQuote : null} onQbQueue={isAdmin ? setQbQueue : null} />
           ) : (
             <RequestList requests={requests} msgs={msgs} role={role} contractorsById={contractorsById} onOpen={openRequest} onStatus={setStatus} onDelete={deleteRequest} />
           ))}
