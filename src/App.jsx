@@ -176,6 +176,8 @@ const IC = {
   alert: <I d={<><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></>} />,
   back: <I d={<><line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" /></>} />,
   plus: <I s={16} d={<><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></>} />,
+  menu: <I d={<><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" /></>} />,
+  shield: <I d={<><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /><polyline points="9 12 11 14 15 10" /></>} />,
 };
 
 // ─── STYLES ──────────────────────────────────────────────────
@@ -317,13 +319,20 @@ tr.click:hover { background:#f0fdf4; cursor:pointer; }
 .ht-ping2 { animation-delay:.34s; }
 .ht-finger { transition:transform .6s cubic-bezier(.5,.05,.4,1); }
 /* MOBILE */
+.hamb { display:none; }
+.side-backdrop { display:none; }
 @media (max-width: 860px) {
-  .side { width:100%; height:auto; bottom:0; top:auto; flex-direction:row; align-items:center; }
-  .side .logo, .side .who { display:none; }
-  .side nav { display:flex; padding:6px; gap:2px; overflow-x:auto; }
-  .side nav button { flex-direction:column; gap:3px; font-size:10px; padding:8px 10px; white-space:nowrap; }
-  .main { margin-left:0; padding:16px 14px 110px; }
+  /* Sidebar becomes a slide-in drawer down the left side (hidden until the ☰ button opens it) */
+  .side { width:82%; max-width:290px; transform:translateX(-100%); transition:transform .22s ease; box-shadow:3px 0 22px rgba(0,0,0,.45); z-index:60; overflow-y:auto; }
+  .side.open { transform:translateX(0); }
+  .side nav button { padding:14px 14px; font-size:15px; }
+  .main { margin-left:0; padding:14px 14px 40px; }
   .builder, .g2, .g3 { grid-template-columns:1fr; }
+  /* Hamburger button in the top bar */
+  .hamb { display:inline-flex; align-items:center; justify-content:center; width:44px; height:44px; flex:0 0 auto;
+    background:var(--dark); color:#fff; border:none; border-radius:0; box-shadow: inset 1px 1px 0 rgba(255,255,255,.15), 0 2px 4px rgba(0,0,0,.25); }
+  /* Dark backdrop behind the open drawer */
+  .side-backdrop.open { display:block; position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:55; }
 }
 `;
 
@@ -1591,6 +1600,75 @@ function ContractorForm({ contractor, onClose, onSave, onDelete, onCreate }) {
   );
 }
 
+// ─── ADMIN: TEAM / STAFF LOGINS ──────────────────────────────
+function AdminUsers({ users, meId, onCreate, onSave, onDelete }) {
+  const [edit, setEdit] = useState(null);
+  const [adding, setAdding] = useState(false);
+  return (
+    <div className="card">
+      <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 6, flexWrap: "wrap", gap: 8 }}>
+        <b>{users.length} team member{users.length === 1 ? "" : "s"}</b>
+        <button className="btn btn-p btn-sm" onClick={() => setAdding(true)}>{IC.plus}&nbsp;Add User</button>
+      </div>
+      <div style={{ fontSize: 12, color: "var(--mut)", marginBottom: 12 }}>Staff logins with full admin access — dashboard, requests, customers, catalog and the builder.</div>
+      <table><thead><tr><th>Name</th><th>Login</th><th>Phone</th><th></th></tr></thead>
+        <tbody>
+          {users.map((u) => (
+            <tr key={u.id}>
+              <td style={{ fontWeight: 700 }}>{u.name || "—"}{u.id === meId && <span className="b b-resp" style={{ marginLeft: 8 }}>You</span>}</td>
+              <td>{u.email}</td><td>{u.phone || "—"}</td>
+              <td style={{ whiteSpace: "nowrap", textAlign: "right" }}>
+                <button className="btn btn-o btn-sm" onClick={() => setEdit(u)}>Edit / Reset</button>
+              </td>
+            </tr>
+          ))}
+          {users.length === 0 && <tr><td colSpan="4" style={{ color: "var(--mut)" }}>No team members yet.</td></tr>}
+        </tbody>
+      </table>
+      {edit && <UserForm user={edit} meId={meId} onClose={() => setEdit(null)} onSave={onSave} onDelete={onDelete} />}
+      {adding && <UserForm user={null} meId={meId} onClose={() => setAdding(false)} onCreate={onCreate} />}
+    </div>
+  );
+}
+
+function UserForm({ user, meId, onClose, onSave, onDelete, onCreate }) {
+  const isNew = !user;
+  const u = user || {};
+  const [f, setF] = useState({ name: u.name || "", email: u.email || "", phone: u.phone || "" });
+  const [pw, setPw] = useState("");
+  const [busy, setBusy] = useState(false);
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  const save = async () => {
+    if (!f.name.trim() || !f.email.trim()) { alert("Name and login/email are required."); return; }
+    if (isNew && pw.length < 4) { alert("Set a temporary password (at least 4 characters) for this user."); return; }
+    if (!isNew && pw && pw.length < 4) { alert("New password must be at least 4 characters."); return; }
+    const fields = { name: f.name.trim(), email: f.email.trim().toLowerCase(), phone: f.phone.trim() };
+    setBusy(true);
+    const ok = isNew ? await onCreate(fields, pw) : await onSave(user.id, fields, pw || null);
+    setBusy(false);
+    if (ok) onClose();
+  };
+  return (
+    <Modal title={isNew ? "Add Team Member" : `Edit ${user.name || user.email}`} onClose={onClose}
+      footer={<>
+        {!isNew && user.id !== meId && <button className="btn btn-d" onClick={() => { if (confirm(`Delete ${user.name || user.email}'s login? This cannot be undone.`)) { onDelete(user.id); onClose(); } }}>{IC.trash}&nbsp;Delete</button>}
+        <button className="btn btn-o" onClick={onClose}>Cancel</button>
+        <button className="btn btn-p" disabled={busy} onClick={save}>{busy ? "Saving..." : (isNew ? "Add User" : "Save Changes")}</button>
+      </>}>
+      <div className="g2">
+        <div className="fld"><label>Name</label><input value={f.name} onChange={set("name")} /></div>
+        <div className="fld"><label>Phone</label><input value={f.phone} onChange={set("phone")} /></div>
+      </div>
+      <div className="fld"><label>Login / Email</label><input value={f.email} onChange={set("email")} placeholder="e.g. andrew or andrew@flash-techinc.com" /></div>
+      <div className="fld">
+        <label>{isNew ? "Temporary Password" : "Reset Password"}</label>
+        <input value={pw} onChange={(e) => setPw(e.target.value)} placeholder={isNew ? "Set a temporary password for this user" : "Type a new password to reset it (leave blank to keep current)"} />
+        <div style={{ fontSize: 12, color: "var(--mut)", marginTop: 4 }}>{isNew ? "Give this to the new team member so they can sign in — they can change it later." : "Type a new password here to reset this user's login."}</div>
+      </div>
+    </Modal>
+  );
+}
+
 // ─── PASSWORD RESET (from emailed ?reset=token link) ─────────
 function ResetPassword({ token, onDone }) {
   const [stage, setStage] = useState("checking"); // checking | ready | invalid | done
@@ -1679,6 +1757,8 @@ export default function App() {
   const [msgs, setMsgs] = useState([]);
   const [parts, setParts] = useState([]);
   const [contractors, setContractors] = useState([]);
+  const [staff, setStaff] = useState([]); // admin/staff logins (managed on the Team page)
+  const [menuOpen, setMenuOpen] = useState(false); // mobile slide-in nav drawer
   const [cart, setCart] = useState([]);
   const [selReq, setSelReq] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -1738,6 +1818,8 @@ export default function App() {
       if (sess.role === "admin") {
         const { data: cons } = await supabase.from("portal_users").select("*").eq("role", "contractor").order("company");
         setContractors(cons || []);
+        const { data: adm } = await supabase.from("portal_users").select("*").eq("role", "admin").order("name");
+        setStaff(adm || []);
       } else {
         const { data: ps } = await supabase.from("portal_custom_flashings").select("*").eq("contractor_id", sess.id).order("created_at", { ascending: false });
         setParts(ps || []);
@@ -2003,6 +2085,33 @@ export default function App() {
     flash(`Welcome email sent to ${c.email}.`);
   };
 
+  // ── admin: manage staff/admin logins (Team page) ──
+  const createUser = async (fields, password) => {
+    const row = { ...fields, password_hash: await sha256(password), role: "admin" };
+    const { error } = await supabase.from("portal_users").insert(row);
+    if (error) { alert(error.code === "23505" ? "That login/email is already in use." : "Could not add user: " + error.message); return false; }
+    await loadAll(session);
+    flash("Team member added.");
+    return true;
+  };
+  const saveUser = async (id, fields, newPassword) => {
+    const patch = { ...fields };
+    if (newPassword) patch.password_hash = await sha256(newPassword);
+    const { error } = await supabase.from("portal_users").update(patch).eq("id", id);
+    if (error) { alert(error.code === "23505" ? "That login/email is already taken." : "Could not save: " + error.message); return false; }
+    await loadAll(session);
+    flash(newPassword ? "Team member updated & password reset." : "Team member updated.");
+    return true;
+  };
+  const deleteUser = async (id) => {
+    if (id === session.id) { alert("You can't delete the account you're signed in with."); return; }
+    if (staff.length <= 1) { alert("You can't delete the last admin account."); return; }
+    const { error } = await supabase.from("portal_users").delete().eq("id", id);
+    if (error) { alert("Could not delete: " + error.message); return; }
+    setStaff((s) => s.filter((u) => u.id !== id));
+    flash("Team member deleted.");
+  };
+
   // ── notifications ──
   const seenKey = session ? `ftp_seen_${session.id}` : "";
   const getSeen = () => { try { return JSON.parse(localStorage.getItem(seenKey)) || {}; } catch { return {}; } };
@@ -2060,7 +2169,7 @@ export default function App() {
   if (mustChangePw) return (<><style>{CSS}</style>{maintBanner}<ForcePasswordChange user={session} onDone={(u) => { setSession(u); setMustChangePw(false); setPage(u.role === "admin" ? "dashboard" : "shop"); }} /></>);
 
   const nav = isAdmin
-    ? [["dashboard", "Dashboard", IC.home], ["requests", "Requests", IC.list], ["customers", "Customers", IC.users], ["catalog", "Catalog", IC.box], ["builder", "Custom Builder", IC.wrench]]
+    ? [["dashboard", "Dashboard", IC.home], ["requests", "Requests", IC.list], ["customers", "Customers", IC.users], ["team", "Team", IC.shield], ["catalog", "Catalog", IC.box], ["builder", "Custom Builder", IC.wrench]]
     : [["shop", "Home", IC.home], ["catalog", "Parts Catalog", IC.box], ["builder", "Custom Flashing", IC.wrench], ["cart", "Cart / Send Request", IC.cart], ["requests", "My Requests", IC.list], ["parts", "My Saved Parts", IC.bookmark]];
 
   const titles = {
@@ -2068,6 +2177,7 @@ export default function App() {
     dashboard: ["Dashboard", "Incoming quote & order requests at a glance"],
     requests: [isAdmin ? "Quote & Order Requests" : "My Requests", isAdmin ? "Click a request to review and respond" : "Track your quotes and orders"],
     customers: ["Customers", "Contractor accounts on the portal"],
+    team: ["Team", "Staff logins with admin access — add, edit, reset or remove"],
     catalog: [isAdmin ? "Parts Catalog" : "Parts Catalog", isAdmin ? "Full price list — search and filter by category" : "Drip edge, coping & accessories — add by linear foot or each"],
     builder: ["Custom Flashing Builder", "Dimensions in, 3D model + price out"],
     cart: ["Cart / Send Request", "Review your items and send a quote or order request"],
@@ -2080,11 +2190,12 @@ export default function App() {
       <style>{CSS}</style>
       {maintBanner}
       <div className="app">
-        <aside className="side">
+        <div className={"side-backdrop" + (menuOpen ? " open" : "")} onClick={() => setMenuOpen(false)} />
+        <aside className={"side" + (menuOpen ? " open" : "")}>
           <div className="logo"><img src="/ft-logo.png" alt="Flash-Tech Mfg, Inc." style={{ width: "100%", display: "block" }} /><small style={{ marginTop: 6 }}>Contractor Portal</small></div>
           <nav>
             {nav.map(([id, label, icon]) => (
-              <button key={id} className={page === id ? "on" : ""} onClick={() => { setPage(id); setSelReq(null); }}>
+              <button key={id} className={page === id ? "on" : ""} onClick={() => { setPage(id); setSelReq(null); setMenuOpen(false); }}>
                 {icon}<span>{label}</span>
                 {id === "cart" && cart.length > 0 && <span className="n">{cart.length}</span>}
                 {id === "dashboard" && notifs.filter((n) => n.urgent).length > 0 && <span className="n">{notifs.filter((n) => n.urgent).length}</span>}
@@ -2105,7 +2216,8 @@ export default function App() {
         </aside>
         <main className="main">
           <div className="topbar">
-            <div><h1>{titles[page]?.[0] || ""}</h1><div className="sub">{titles[page]?.[1] || ""}</div></div>
+            <button className="hamb" aria-label="Menu" onClick={() => setMenuOpen(true)}>{IC.menu}</button>
+            <div style={{ flex: 1, minWidth: 0 }}><h1>{titles[page]?.[0] || ""}</h1><div className="sub">{titles[page]?.[1] || ""}</div></div>
             <Bell items={notifs} onPick={(n) => openRequest(n.go)} />
           </div>
           {toast && <div className="note">{toast}</div>}
@@ -2113,6 +2225,7 @@ export default function App() {
 
           {page === "dashboard" && isAdmin && <AdminDashboard requests={requests} msgs={msgs} contractorsById={contractorsById} onOpen={openRequest} />}
           {page === "customers" && isAdmin && <AdminCustomers contractors={contractors} requests={requests} onSave={saveContractor} onDelete={deleteContractor} onCreate={createContractor} onNotify={notifyContractor} />}
+          {page === "team" && isAdmin && <AdminUsers users={staff} meId={session.id} onCreate={createUser} onSave={saveUser} onDelete={deleteUser} />}
           {page === "shop" && !isAdmin && <ShopPage products={products} discPct={discPct} onPickCategory={openCategory} onBuilder={openBuilder} />}
           {page === "catalog" && isAdmin && <CatalogPage products={products} readOnly />}
           {page === "catalog" && !isAdmin && <CatalogPage products={products} onAdd={addProduct} disc={applyDisc} discPct={discPct} seedCat={catSeed.cat} seedNonce={catSeed.nonce} />}
