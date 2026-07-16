@@ -193,6 +193,7 @@ export const DRAWINGS = [
   { id: "6in-t-top", title: "6\" T-Top Vent", file: "/drawings/6in-t-top.pdf", category: "Vents", note: "Dimensions" },
   { id: "bowl-drain", title: "Bowl Drain (TPO/PVC)", file: "/drawings/bowl-drain-tpo-pvc.pdf", category: "Drains", note: "TPO / PVC" },
   { id: "basket-drain-overflow", title: "Basket Drain + Overflow (Combo)", file: "/drawings/basket-drain-overflow.pdf", category: "Drains", note: "Combo assembly" },
+  { id: "scupper-overflow", title: "Scupper Overflow", file: "/drawings/scupper-overflow.pdf", category: "Scuppers", note: "TPO/PVC coated + stainless" },
   { id: "pitch-pocket", title: "Pitch Pocket", file: "/drawings/pitch-pocket.pdf", category: "Sealant Pockets & Ovals", note: "Dimensions" },
   { id: "solar-anchor", title: "Solar Anchor", file: "/drawings/solar-anchor.pdf", category: "Corners & Accessories", note: "Dimensions" },
   { id: "storm-collar-assembly", title: "Storm Collar — Worm-Clamp Assembly", file: "/drawings/storm-collar-assembly.pdf", category: "Pipe Boots & Flashings", note: "Assembly" },
@@ -624,6 +625,8 @@ export const BUILDER_MARKUP = 1.20;
 export const STRETCH_RATE = {
   G26: 3.70,   // Galvanized 26ga
   G24: 4.25,   // Galvanized 24ga
+  B26: 3.70,   // Bonderized 26ga — same as galvanized
+  B24: 4.25,   // Bonderized 24ga — same as galvanized
   KYN24: 5.50, // Kynar 24ga (painted)
   KYN22: 6.25, // Kynar 22ga (painted)
   SS24: 7.25,  // Stainless
