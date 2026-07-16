@@ -189,7 +189,12 @@ export const POPULAR_SKUS = new Set([
 // To add one: drop the PDF in public/drawings/ and add a row here.
 export const DRAWINGS = [
   { id: "gravity-vent", title: "Gravity Vent", file: "/drawings/gravity-vent.pdf", category: "Vents", note: "Assembly & dimensions" },
+  { id: "louver-vent", title: "Louver Vent", file: "/drawings/louver-vent.pdf", category: "Vents", note: "Dimensions" },
+  { id: "6in-t-top", title: "6\" T-Top Vent", file: "/drawings/6in-t-top.pdf", category: "Vents", note: "Dimensions" },
+  { id: "bowl-drain", title: "Bowl Drain (TPO/PVC)", file: "/drawings/bowl-drain-tpo-pvc.pdf", category: "Drains", note: "TPO / PVC" },
   { id: "basket-drain-overflow", title: "Basket Drain + Overflow (Combo)", file: "/drawings/basket-drain-overflow.pdf", category: "Drains", note: "Combo assembly" },
+  { id: "pitch-pocket", title: "Pitch Pocket", file: "/drawings/pitch-pocket.pdf", category: "Sealant Pockets & Ovals", note: "Dimensions" },
+  { id: "solar-anchor", title: "Solar Anchor", file: "/drawings/solar-anchor.pdf", category: "Corners & Accessories", note: "Dimensions" },
   { id: "storm-collar-assembly", title: "Storm Collar — Worm-Clamp Assembly", file: "/drawings/storm-collar-assembly.pdf", category: "Pipe Boots & Flashings", note: "Assembly" },
   { id: "storm-collar-example", title: "Storm Collar — Example", file: "/drawings/storm-collar-example.pdf", category: "Pipe Boots & Flashings", note: "Reference example" },
 ];
