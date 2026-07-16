@@ -183,6 +183,18 @@ export const POPULAR_SKUS = new Set([
   "FT-1001TPO", "FT-1001PVC",   // 1-6" conical boot
 ]);
 
+// ─── SHOP DRAWINGS (submittal PDFs) ──────────────────────────
+// PDFs live in /public/drawings/. `category` matches a catalog category so the
+// catalog can surface a "Shop Drawing" download on matching products.
+// To add one: drop the PDF in public/drawings/ and add a row here.
+export const DRAWINGS = [
+  { id: "gravity-vent", title: "Gravity Vent", file: "/drawings/gravity-vent.pdf", category: "Vents", note: "Assembly & dimensions" },
+  { id: "basket-drain-overflow", title: "Basket Drain + Overflow (Combo)", file: "/drawings/basket-drain-overflow.pdf", category: "Drains", note: "Combo assembly" },
+  { id: "storm-collar-assembly", title: "Storm Collar — Worm-Clamp Assembly", file: "/drawings/storm-collar-assembly.pdf", category: "Pipe Boots & Flashings", note: "Assembly" },
+  { id: "storm-collar-example", title: "Storm Collar — Example", file: "/drawings/storm-collar-example.pdf", category: "Pipe Boots & Flashings", note: "Reference example" },
+];
+export const drawingsByCategory = (cat) => DRAWINGS.filter((d) => d.category === cat);
+
 // Product photos from flash-techinc.com (mapped by description keywords).
 // Returns a thumbnail URL, or null when there's no matching photo.
 const FT_IMG = "https://flash-techinc.com/wp-content/uploads";

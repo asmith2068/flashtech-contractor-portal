@@ -8,6 +8,7 @@ import {
   membranePrice, membranePartNumber, membraneDescription,
   scupperPrice, scupperPartNumber, scupperSides, scupperTier, productImage, POPULAR_SKUS,
   customProfilePoints, panPrice, panPartNumber, panDescription, panBlank, partDXF,
+  DRAWINGS, drawingsByCategory,
 } from "./catalog.js";
 
 // ─── UTILITIES ───────────────────────────────────────────────
@@ -178,6 +179,8 @@ const IC = {
   plus: <I s={16} d={<><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></>} />,
   menu: <I d={<><line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" /></>} />,
   shield: <I d={<><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /><polyline points="9 12 11 14 15 10" /></>} />,
+  download: <I d={<><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></>} />,
+  file: <I d={<><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></>} />,
 };
 
 // ─── STYLES ──────────────────────────────────────────────────
@@ -1669,6 +1672,48 @@ function UserForm({ user, meId, onClose, onSave, onDelete, onCreate }) {
   );
 }
 
+// ─── DOWNLOADS: shop drawings for submittals ─────────────────
+function DownloadsPage() {
+  const [q, setQ] = useState("");
+  const term = q.trim().toLowerCase();
+  const list = term ? DRAWINGS.filter((d) => (d.title + " " + d.category + " " + (d.note || "")).toLowerCase().includes(term)) : DRAWINGS;
+  // group by category
+  const cats = [...new Set(list.map((d) => d.category))];
+  return (
+    <div>
+      <div className="banner" style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", color: "#166534" }}>
+        {IC.file}<div><b>Shop drawings for submittals.</b> Download the PDF for any product to include in your submittal package. Need one that isn't here yet? Ask your Flash-Tech rep.</div>
+      </div>
+      <div className="fld" style={{ maxWidth: 360, marginBottom: 18 }}>
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search shop drawings…" />
+      </div>
+      {list.length === 0 && <div className="card" style={{ color: "var(--mut)" }}>No shop drawings match “{q}”.</div>}
+      {cats.map((cat) => (
+        <div key={cat} style={{ marginBottom: 22 }}>
+          <h3 style={{ fontSize: 15, marginBottom: 10, color: "var(--mut)", textTransform: "uppercase", letterSpacing: ".04em" }}>{cat}</h3>
+          <div className="shopgrid">
+            {list.filter((d) => d.category === cat).map((d) => (
+              <div key={d.id} className="tile" style={{ padding: 16, gap: 12 }}>
+                <div className="row" style={{ gap: 12, alignItems: "flex-start" }}>
+                  <div style={{ color: "var(--red)", flex: "0 0 auto" }}>{IC.file}</div>
+                  <div style={{ minWidth: 0 }}>
+                    <b style={{ display: "block", fontSize: 15, lineHeight: 1.2 }}>{d.title}</b>
+                    {d.note && <small style={{ color: "var(--mut)" }}>{d.note}</small>}
+                  </div>
+                </div>
+                <div className="row" style={{ gap: 8, marginTop: 4 }}>
+                  <a className="btn btn-p btn-sm" href={d.file} download style={{ textDecoration: "none" }}>{IC.download}&nbsp;Download PDF</a>
+                  <a className="btn btn-o btn-sm" href={d.file} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>View</a>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ─── PASSWORD RESET (from emailed ?reset=token link) ─────────
 function ResetPassword({ token, onDone }) {
   const [stage, setStage] = useState("checking"); // checking | ready | invalid | done
@@ -2169,8 +2214,8 @@ export default function App() {
   if (mustChangePw) return (<><style>{CSS}</style>{maintBanner}<ForcePasswordChange user={session} onDone={(u) => { setSession(u); setMustChangePw(false); setPage(u.role === "admin" ? "dashboard" : "shop"); }} /></>);
 
   const nav = isAdmin
-    ? [["dashboard", "Dashboard", IC.home], ["requests", "Requests", IC.list], ["customers", "Customers", IC.users], ["team", "Team", IC.shield], ["catalog", "Catalog", IC.box], ["builder", "Custom Builder", IC.wrench]]
-    : [["shop", "Home", IC.home], ["catalog", "Parts Catalog", IC.box], ["builder", "Custom Flashing", IC.wrench], ["cart", "Cart / Send Request", IC.cart], ["requests", "My Requests", IC.list], ["parts", "My Saved Parts", IC.bookmark]];
+    ? [["dashboard", "Dashboard", IC.home], ["requests", "Requests", IC.list], ["customers", "Customers", IC.users], ["team", "Team", IC.shield], ["catalog", "Catalog", IC.box], ["builder", "Custom Builder", IC.wrench], ["downloads", "Downloads", IC.download]]
+    : [["shop", "Home", IC.home], ["catalog", "Parts Catalog", IC.box], ["builder", "Custom Flashing", IC.wrench], ["downloads", "Downloads", IC.download], ["cart", "Cart / Send Request", IC.cart], ["requests", "My Requests", IC.list], ["parts", "My Saved Parts", IC.bookmark]];
 
   const titles = {
     shop: ["Welcome to Flash-Tech", "Pick a category — or jump straight into a custom builder"],
@@ -2178,6 +2223,7 @@ export default function App() {
     requests: [isAdmin ? "Quote & Order Requests" : "My Requests", isAdmin ? "Click a request to review and respond" : "Track your quotes and orders"],
     customers: ["Customers", "Contractor accounts on the portal"],
     team: ["Team", "Staff logins with admin access — add, edit, reset or remove"],
+    downloads: ["Shop Drawings", "Download submittal PDFs for your Flash-Tech products"],
     catalog: [isAdmin ? "Parts Catalog" : "Parts Catalog", isAdmin ? "Full price list — search and filter by category" : "Drip edge, coping & accessories — add by linear foot or each"],
     builder: ["Custom Flashing Builder", "Dimensions in, 3D model + price out"],
     cart: ["Cart / Send Request", "Review your items and send a quote or order request"],
@@ -2226,6 +2272,7 @@ export default function App() {
           {page === "dashboard" && isAdmin && <AdminDashboard requests={requests} msgs={msgs} contractorsById={contractorsById} onOpen={openRequest} />}
           {page === "customers" && isAdmin && <AdminCustomers contractors={contractors} requests={requests} onSave={saveContractor} onDelete={deleteContractor} onCreate={createContractor} onNotify={notifyContractor} />}
           {page === "team" && isAdmin && <AdminUsers users={staff} meId={session.id} onCreate={createUser} onSave={saveUser} onDelete={deleteUser} />}
+          {page === "downloads" && <DownloadsPage />}
           {page === "shop" && !isAdmin && <ShopPage products={products} discPct={discPct} onPickCategory={openCategory} onBuilder={openBuilder} />}
           {page === "catalog" && isAdmin && <CatalogPage products={products} readOnly />}
           {page === "catalog" && !isAdmin && <CatalogPage products={products} onAdd={addProduct} disc={applyDisc} discPct={discPct} seedCat={catSeed.cat} seedNonce={catSeed.nonce} />}
