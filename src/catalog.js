@@ -325,7 +325,7 @@ export const FLASHING_TYPES = [
     fields: [
       { key: "flange", label: 'Deck Flange (in)', def: 3, min: 1, max: 12 },
       { key: "face", label: 'Face (in)', def: 2, min: 1, max: 12 },
-      { key: "kick", label: 'Kick-Out (in)', def: 0.75, min: 0, max: 3, step: 0.25 },
+      { key: "kick", label: 'Kick-Out (in)', def: 0.5, min: 0, max: 3, step: 0.25 },
       { key: "kickAngle", label: "Kick Angle (°)", def: 35, min: 0, max: 75, step: 5 },
       { key: "edge", label: "Bottom Edge", type: "choice", def: "kick", options: [
         { value: "kick", label: "Kick only" },
@@ -388,7 +388,7 @@ export const FLASHING_TYPES = [
       { key: "width", label: "Wall Width (in)", def: 12, min: 4, max: 30 },
       { key: "front", label: "Front Face (in)", def: 4, min: 1, max: 12 },
       { key: "back", label: "Back Face (in)", def: 3, min: 1, max: 12 },
-      { key: "kick", label: "Kick-Out (in)", def: 0.75, min: 0.25, max: 2, step: 0.25 },
+      { key: "kick", label: "Kick-Out (in)", def: 0.5, min: 0.25, max: 2, step: 0.25 },
       { key: "kickAngle", label: "Kick Angle (°)", def: 45, min: 15, max: 75, step: 5 },
       { key: "edge", label: "Bottom Edge", type: "choice", def: "kick", options: [{ value: "kick", label: "Kick only" }, { value: "hemkick", label: "Hem + Kick" }] },
       { key: "cleat", label: "Cleat", type: "choice", def: "full", options: [{ value: "full", label: "Full-length cleat" }, { value: "segmented", label: "Segmented cleats" }, { value: "none", label: "No cleat" }] },
@@ -397,7 +397,7 @@ export const FLASHING_TYPES = [
     points: (p) => {
       const slope = 0.6; // top slopes for drainage
       const ka = rad(p.kickAngle ?? 45);
-      const kick = p.kick ?? 0.75;
+      const kick = p.kick ?? 0.5;
       const hem = p.edge === "hemkick";
       const hl = 0.5; // hemmed return length
       const pts = [];
@@ -411,7 +411,7 @@ export const FLASHING_TYPES = [
       if (hem) pts.push([bKick[0] - hl, bKick[1]]);
       return pts;
     },
-    dims: (p) => `${p.width}" wall, ${p.front}"/${p.back}" faces, ${p.kick ?? 0.75}" kick-out @ ${p.kickAngle ?? 45}°${p.edge === "hemkick" ? ", hemmed" : ""}` +
+    dims: (p) => `${p.width}" wall, ${p.front}"/${p.back}" faces, ${p.kick ?? 0.5}" kick-out @ ${p.kickAngle ?? 45}°${p.edge === "hemkick" ? ", hemmed" : ""}` +
       (p.cleat === "segmented" ? ", segmented cleats" : p.cleat === "none" ? "" : ", full-length cleat") +
       (p.splice === "no" ? "" : ", splice plates"),
   },
@@ -618,7 +618,25 @@ const MIN_PIECE = 14; // shop minimum per piece
 // membrane flashings, scuppers, box/pan caps). 1.20 = +20%. Change this one number to adjust.
 export const BUILDER_MARKUP = 1.20;
 
+// Final customer price per INCH of stretch-out on a 10' piece, keyed by base material
+// (color suffix ignored, e.g. KYN24-RW → KYN24). null = quoted on request (copper).
+// Markup is baked into these numbers. Materials not listed fall back to the rate × markup model.
+export const STRETCH_RATE = {
+  G26: 3.70,   // Galvanized 26ga
+  G24: 4.25,   // Galvanized 24ga
+  KYN24: 5.50, // Kynar 24ga (painted)
+  KYN22: 6.25, // Kynar 22ga (painted)
+  SS24: 7.25,  // Stainless
+  CU16: null,  // Copper — priced on request, no number shown
+};
 export const piecePrice = (girth, bends, lengthFt, matCode) => {
+  const base = String(matCode || "").split("-")[0];
+  if (Object.prototype.hasOwnProperty.call(STRETCH_RATE, base)) {
+    const r = STRETCH_RATE[base];
+    if (r == null) return null; // copper — no price
+    const raw = girth * r * (lengthFt / 10) + bends * BEND_CHARGE;
+    return Math.round(Math.max(MIN_PIECE, raw) * 100) / 100; // markup already in the rate
+  }
   const m = matByCode(matCode);
   const raw = girth * m.rate * lengthFt + bends * BEND_CHARGE;
   return Math.round(Math.max(MIN_PIECE, raw) * BUILDER_MARKUP * 100) / 100;

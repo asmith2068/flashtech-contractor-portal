@@ -13,6 +13,8 @@ import {
 
 // ─── UTILITIES ───────────────────────────────────────────────
 const fmt = (n) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n || 0);
+// Like fmt, but shows "By request" when the price is null/undefined (e.g. copper — priced on request).
+const fmtQ = (n) => (n == null ? "By request" : fmt(n));
 const fmtDate = (iso) => { if (!iso) return ""; return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }); };
 const fmtDateTime = (iso) => { if (!iso) return ""; return new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); };
 const hoursSince = (iso) => (Date.now() - new Date(iso).getTime()) / 36e5;
@@ -95,7 +97,7 @@ const FT_INFO = { addr: "215 Denny Way Suite D, El Cajon, CA 92020", phone: "(61
 const unitLabel = (u) => (u === "lf" ? "LF" : u === "pc" ? "pcs" : "ea");
 function printQuote({ kind = "quote", reqId, created, status, billTo, meta = {}, items, subtotal, quotedTotal }) {
   const esc = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
-  const rows = items.map((i) => `<tr><td>${esc(i.sku || "")}</td><td>${esc(i.description)}</td><td class="c">${i.qty} ${unitLabel(i.unit)}</td><td class="r">${fmt(i.unit_price)}</td><td class="r">${fmt(i.line_total)}</td></tr>`).join("");
+  const rows = items.map((i) => `<tr><td>${esc(i.sku || "")}</td><td>${esc(i.description)}</td><td class="c">${i.qty} ${unitLabel(i.unit)}</td><td class="r">${fmtQ(i.unit_price)}</td><td class="r">${fmtQ(i.line_total)}</td></tr>`).join("");
   const total = quotedTotal != null ? quotedTotal : subtotal;
   const heading = kind === "order" ? "ORDER" : "QUOTE";
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>Flash-Tech ${heading}${reqId ? " #" + reqId.slice(0, 8) : ""}</title>
@@ -190,7 +192,8 @@ const CSS = `
 * { box-sizing:border-box; margin:0; padding:0; }
 body { font-family:'Barlow','Segoe UI',system-ui,-apple-system,sans-serif; background:var(--bg); color:var(--ink); }
 h1,h2,h3,.side .logo b { font-family:'Oswald','Barlow',sans-serif; text-transform:uppercase; letter-spacing:.02em; }
-button { font-family:inherit; cursor:pointer; }
+button { font-family:inherit; cursor:pointer; touch-action:manipulation; }
+a.btn { touch-action:manipulation; }
 input,select,textarea { font-family:inherit; font-size:14px; padding:9px 11px; border:1px solid var(--line); border-radius:0; background:#fff; width:100%; }
 input:focus,select:focus,textarea:focus { outline:2px solid var(--grn); border-color:var(--grn); }
 label { font-size:12px; font-weight:600; color:var(--mut); display:block; margin-bottom:4px; text-transform:uppercase; letter-spacing:.03em; }
@@ -248,6 +251,9 @@ label { font-size:12px; font-weight:600; color:var(--mut); display:block; margin
 .stat { background:var(--card); border:1px solid var(--line); border-radius:0; padding:16px; box-shadow:0 2px 7px rgba(0,0,0,.07); }
 .stat .v { font-size:26px; font-weight:800; } .stat .l { font-size:12px; color:var(--mut); font-weight:600; text-transform:uppercase; }
 .stat.warn { border-color:#fecaca; background:#fef2f2; } .stat.warn .v { color:var(--red); }
+.stat.clk { cursor:pointer; transition:transform .08s ease, box-shadow .08s ease, border-color .12s; }
+.stat.clk:hover { transform:translateY(-2px); border-color:var(--grn); box-shadow:0 7px 16px rgba(0,0,0,.13); }
+.stat.clk .l { display:flex; justify-content:space-between; align-items:center; }
 /* TABLE */
 table { width:100%; border-collapse:collapse; font-size:14px; }
 th { text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--mut); padding:9px 10px; border-bottom:2px solid var(--line); }
@@ -325,15 +331,23 @@ tr.click:hover { background:#f0fdf4; cursor:pointer; }
 .hamb { display:none; }
 .side-backdrop { display:none; }
 @media (max-width: 860px) {
-  /* Sidebar becomes a slide-in drawer down the left side (hidden until the ☰ button opens it) */
-  .side { width:82%; max-width:290px; transform:translateX(-100%); transition:transform .22s ease; box-shadow:3px 0 22px rgba(0,0,0,.45); z-index:60; overflow-y:auto; }
+  /* Sidebar becomes a slide-in drawer down the left side (hidden until the ☰ button opens it).
+     Safe-area insets keep the logo/nav clear of the status bar & home indicator on iPhone. */
+  .side { width:82%; max-width:290px; transform:translateX(-100%); transition:transform .22s ease; box-shadow:3px 0 22px rgba(0,0,0,.45); z-index:60; overflow-y:auto;
+    padding-top:env(safe-area-inset-top); padding-bottom:env(safe-area-inset-bottom); }
   .side.open { transform:translateX(0); }
-  .side nav button { padding:14px 14px; font-size:15px; }
-  .main { margin-left:0; padding:14px 14px 40px; }
+  .side nav button { padding:15px 14px; font-size:15px; }
+  /* Top bar sticks to the top so ☰ is always reachable; safe-area top padding lifts it out
+     from under the Dynamic Island / status bar (the old cause of "tap 100 times"). */
+  .topbar { position:sticky; top:0; z-index:40; background:var(--bg); margin:0 -14px 16px; padding:8px 14px 10px;
+    padding-top:calc(8px + env(safe-area-inset-top)); border-bottom:1px solid var(--line); }
+  .main { margin-left:0; padding:0 calc(14px + env(safe-area-inset-right)) calc(40px + env(safe-area-inset-bottom)) calc(14px + env(safe-area-inset-left)); }
   .builder, .g2, .g3 { grid-template-columns:1fr; }
-  /* Hamburger button in the top bar */
-  .hamb { display:inline-flex; align-items:center; justify-content:center; width:44px; height:44px; flex:0 0 auto;
-    background:var(--dark); color:#fff; border:none; border-radius:0; box-shadow: inset 1px 1px 0 rgba(255,255,255,.15), 0 2px 4px rgba(0,0,0,.25); }
+  /* Hamburger — large, solid tap target with no tap delay */
+  .hamb { display:inline-flex; align-items:center; justify-content:center; width:48px; height:48px; flex:0 0 auto;
+    background:var(--dark); color:#fff; border:none; border-radius:0; -webkit-tap-highlight-color:rgba(13,215,20,.35);
+    box-shadow: inset 1px 1px 0 rgba(255,255,255,.15), 0 2px 4px rgba(0,0,0,.25); }
+  .hamb svg { pointer-events:none; }
   /* Dark backdrop behind the open drawer */
   .side-backdrop.open { display:block; position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:55; }
 }
@@ -913,7 +927,7 @@ function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc =
     : isSheet ? piecePrice(girth, bends, effLen, matCode)
     : isScupper ? scupperPrice(geo, matCode)
     : membranePrice(geo, matCode, split, vp.mil);
-  const perLF = (isSheet && !isPan) ? Math.round((perPiece / effLen) * 100) / 100 : null;
+  const perLF = (isSheet && !isPan && perPiece != null) ? Math.round((perPiece / effLen) * 100) / 100 : null;
   const partNo = isPan ? panPartNumber(matCode, vp)
     : isSheet ? customPartNumber(typeId, matCode, girth)
     : isScupper ? scupperPartNumber(matCode, geo)
@@ -921,7 +935,9 @@ function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc =
   const desc = isPan ? panDescription(matCode, vp)
     : isSheet ? customDescription(typeId, matCode, vp, effLen, girth)
     : membraneDescription(typeId, matCode, vp, split);
-  const total = Math.round(perPiece * pieces * 100) / 100;
+  const total = perPiece == null ? null : Math.round(perPiece * pieces * 100) / 100;
+  // Apply contractor discount then format; shows "By request" for no-price items (copper).
+  const priceTxt = (n) => (n == null ? "By request" : fmt(disc(n)));
 
   const pickType = (id) => {
     const nk = typeById(id).kind || "sheet";
@@ -1099,25 +1115,25 @@ function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc =
           {isPan ? (<>
             <div><span>Size (L×W×H)</span><b>{vp.length}×{vp.width}×{vp.height}"</b></div>
             <div><span>Flat Blank</span><b>{panBlank(vp).l}×{panBlank(vp).w}"</b></div>
-            <div><span>Each</span><b>{fmt(disc(perPiece))}</b></div>
-            <div><span>{pieces} each</span><b>{fmt(disc(total))}</b></div>
+            <div><span>Each</span><b>{priceTxt(perPiece)}</b></div>
+            <div><span>{pieces} each</span><b>{priceTxt(total)}</b></div>
           </>) : isSheet ? (<>
             <div><span>Stretch-Out</span><b>{girth}"</b></div>
             <div><span>Bends</span><b>{bends}</b></div>
-            <div><span>Per Piece ({effLen}')</span><b>{fmt(disc(perPiece))}</b></div>
-            <div><span>Per Lin. Ft</span><b>{fmt(disc(perLF))}</b></div>
-            <div><span>{pieces} pcs ({pieces * effLen} LF)</span><b>{fmt(disc(total))}</b></div>
+            <div><span>Per Piece ({effLen}')</span><b>{priceTxt(perPiece)}</b></div>
+            <div><span>Per Lin. Ft</span><b>{priceTxt(perLF)}</b></div>
+            <div><span>{pieces} pcs ({pieces * effLen} LF)</span><b>{priceTxt(total)}</b></div>
           </>) : isScupper ? (<>
             <div><span>Opening</span><b>{geo.w}"×{geo.h}"</b></div>
             <div><span>Throat</span><b>{geo.throat}"</b></div>
             <div><span>4 Sides</span><b>{scupperSides(geo.w, geo.h)}"</b></div>
-            <div><span>Each</span><b>{fmt(disc(perPiece))}</b></div>
-            <div><span>{pieces} each</span><b>{fmt(disc(total))}</b></div>
+            <div><span>Each</span><b>{priceTxt(perPiece)}</b></div>
+            <div><span>{pieces} each</span><b>{priceTxt(total)}</b></div>
           </>) : (<>
             <div><span>{geo.shape === "square" ? "Tube" : geo.shape === "cone" ? "Base ⌀" : "Pipe ⌀"}</span><b>{geo.shape === "square" ? `${geo.half * 2}"×${geo.half * 2}"` : `${geo.botR * 2}"`}</b></div>
             <div><span>{geo.tilt ? "Miter" : geo.shape === "cone" ? "Top ⌀" : "Height"}</span><b>{geo.tilt ? `${geo.tilt}°` : geo.shape === "cone" ? `${geo.topR * 2}"` : `${geo.height}"`}</b></div>
-            <div><span>Each</span><b>{fmt(disc(perPiece))}</b></div>
-            <div><span>{pieces} each</span><b>{fmt(disc(total))}</b></div>
+            <div><span>Each</span><b>{priceTxt(perPiece)}</b></div>
+            <div><span>{pieces} each</span><b>{priceTxt(total)}</b></div>
           </>)}
         </div>
         <div className="card" style={{ marginTop: 12, fontSize: 14 }}>
@@ -1151,7 +1167,7 @@ function MyPartsPage({ parts, onAdd, onDel, disc = (x) => x }) {
               <b>{p.name || t.name}</b>
               <button className="btn btn-d btn-sm" onClick={() => onDel(p)}>{IC.trash}</button>
             </div>
-            <div style={{ fontSize: 13, color: "var(--mut)", margin: "2px 0 8px" }}>{p.part_number} — {anyMat(p.material_code).name} — {fmt(disc(p.price_per_piece))}{isSheet ? `/pc (${p.piece_length_ft}')` : " ea"}</div>
+            <div style={{ fontSize: 13, color: "var(--mut)", margin: "2px 0 8px" }}>{p.part_number} — {anyMat(p.material_code).name} — {p.price_per_piece == null ? "By request" : fmt(disc(p.price_per_piece))}{isSheet ? `/pc (${p.piece_length_ft}')` : " ea"}</div>
             <div className="preview3d">
               {isSheet
                 ? <Flashing3D points={t.points(p.params)} lengthFt={p.piece_length_ft} materialCode={p.material_code} height={150} showDims={false} />
@@ -1172,7 +1188,8 @@ function MyPartsPage({ parts, onAdd, onDel, disc = (x) => x }) {
 const MEMBRANE_MFRS = ["Carlisle SynTec", "Elevate (Firestone)", "GAF", "Johns Manville", "Versico", "Mule-Hide", "IB Roof Systems", "Sika Sarnafil", "FiberTite", "Other / not sure", "N/A — metal only"];
 function CartPage({ cart, onRemove, onClear, onSubmit, busy, user }) {
   const [meta, setMeta] = useState({ req_type: "quote", job_name: "", po_number: "", needed_by: "", membrane_mfr: "", metal_color: "", notes: "" });
-  const subtotal = cart.reduce((s, i) => s + i.line_total, 0);
+  const subtotal = cart.reduce((s, i) => s + (i.line_total || 0), 0);
+  const hasByRequest = cart.some((i) => i.line_total == null);
   const set = (k) => (e) => setMeta({ ...meta, [k]: e.target.value });
   const doPrint = () => printQuote({ kind: meta.req_type, billTo: user, meta, items: cart, subtotal });
   const submit = () => {
@@ -1194,12 +1211,13 @@ function CartPage({ cart, onRemove, onClear, onSubmit, busy, user }) {
               <tr key={i.key}>
                 <td><b>{i.sku}</b><br /><small>{i.description}</small></td>
                 <td style={{ whiteSpace: "nowrap" }}>{i.qty} {i.unit === "lf" ? "LF" : i.unit === "pc" ? "pcs" : "EA"}</td>
-                <td>{fmt(i.unit_price)}</td>
-                <td>{fmt(i.line_total)}</td>
+                <td>{fmtQ(i.unit_price)}</td>
+                <td>{fmtQ(i.line_total)}</td>
                 <td><button className="btn btn-d btn-sm" onClick={() => onRemove(i.key)}>{IC.trash}</button></td>
               </tr>
             ))}
             <tr><td colSpan="3" style={{ textAlign: "right", fontWeight: 700 }}>Estimated Subtotal</td><td style={{ fontWeight: 800 }}>{fmt(subtotal)}</td><td></td></tr>
+            {hasByRequest && <tr><td colSpan="5" style={{ color: "var(--mut)", fontSize: 12 }}>Some items (e.g. copper) are priced on request — Flash-Tech will quote them.</td></tr>}
           </tbody>
         </table>
         <div className="row" style={{ marginTop: 10 }}>
@@ -1317,7 +1335,7 @@ function RequestDetail({ req, items, msgs, role, contractor, user, onBack, onSen
                   <tr>
                     <td><b>{i.sku}</b><br /><small>{i.description}</small></td>
                     <td style={{ whiteSpace: "nowrap" }}>{i.qty} {i.unit === "lf" ? "LF" : i.unit === "pc" ? "pcs" : "EA"}</td>
-                    <td>{fmt(i.unit_price)}</td><td>{fmt(i.line_total)}</td>
+                    <td>{fmtQ(i.unit_price)}</td><td>{fmtQ(i.line_total)}</td>
                   </tr>
                   {i.item_kind === "custom" && i.detail?.params && (() => {
                     const dt = typeById(i.detail.flashing_type);
@@ -1424,15 +1442,27 @@ function RequestDetail({ req, items, msgs, role, contractor, user, onBack, onSen
 }
 
 // ─── REQUEST LIST (shared) ───────────────────────────────────
-function RequestList({ requests, msgs, role, contractorsById, onOpen, onStatus, onDelete }) {
-  const [fStatus, setFStatus] = useState("all");
+function RequestList({ requests, msgs, role, contractorsById, onOpen, onStatus, onDelete, initialStatus = "all" }) {
+  const [fStatus, setFStatus] = useState(initialStatus);
   const [fType, setFType] = useState("all");
-  const list = requests.filter((r) => (fStatus === "all" || r.status === fStatus) && (fType === "all" || r.req_type === fType));
+  useEffect(() => { setFStatus(initialStatus); }, [initialStatus]);
+  // Real statuses plus the dashboard pseudo-filters (open / awaiting response / overdue).
+  const matchStatus = (r) => {
+    if (fStatus === "all") return true;
+    if (fStatus === "open") return r.status !== "closed";
+    if (fStatus === "pending") return needsResponse(r, msgs);
+    if (fStatus === "overdue") return needsResponse(r, msgs) && hoursSince(waitingSince(r, msgs)) >= REMIND_HOURS;
+    return r.status === fStatus;
+  };
+  const list = requests.filter((r) => matchStatus(r) && (fType === "all" || r.req_type === fType));
   return (
     <div className="card">
       <div className="row" style={{ marginBottom: 12, flexWrap: "wrap" }}>
-        <select style={{ width: 160 }} value={fStatus} onChange={(e) => setFStatus(e.target.value)}>
+        <select style={{ width: 170 }} value={fStatus} onChange={(e) => setFStatus(e.target.value)}>
           <option value="all">All statuses</option>
+          {role === "admin" && <option value="open">Open (not closed)</option>}
+          {role === "admin" && <option value="pending">Awaiting response</option>}
+          {role === "admin" && <option value="overdue">Overdue</option>}
           {Object.entries(STATUS_META).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
         </select>
         <select style={{ width: 140 }} value={fType} onChange={(e) => setFType(e.target.value)}>
@@ -1478,7 +1508,7 @@ function RequestList({ requests, msgs, role, contractorsById, onOpen, onStatus, 
 }
 
 // ─── ADMIN DASHBOARD ─────────────────────────────────────────
-function AdminDashboard({ requests, msgs, contractorsById, onOpen }) {
+function AdminDashboard({ requests, msgs, contractorsById, onOpen, onNav }) {
   const open = requests.filter((r) => r.status !== "closed");
   const pending = requests.filter((r) => needsResponse(r, msgs));
   const overdue = pending.filter((r) => hoursSince(waitingSince(r, msgs)) >= REMIND_HOURS);
@@ -1492,10 +1522,10 @@ function AdminDashboard({ requests, msgs, contractorsById, onOpen }) {
         </div>
       )}
       <div className="stats">
-        <div className="stat"><div className="v">{requests.filter((r) => r.status === "new").length}</div><div className="l">New Requests</div></div>
-        <div className="stat"><div className="v">{pending.length}</div><div className="l">Awaiting Response</div></div>
-        <div className={`stat ${overdue.length ? "warn" : ""}`}><div className="v">{overdue.length}</div><div className="l">Overdue ({REMIND_HOURS}h+)</div></div>
-        <div className="stat"><div className="v">{open.length}</div><div className="l">Open Requests</div></div>
+        <div className="stat clk" onClick={() => onNav("new")} title="View new requests"><div className="v">{requests.filter((r) => r.status === "new").length}</div><div className="l">New Requests ›</div></div>
+        <div className="stat clk" onClick={() => onNav("pending")} title="View requests awaiting a response"><div className="v">{pending.length}</div><div className="l">Awaiting Response ›</div></div>
+        <div className={`stat clk ${overdue.length ? "warn" : ""}`} onClick={() => onNav("overdue")} title="View overdue requests"><div className="v">{overdue.length}</div><div className="l">Overdue ({REMIND_HOURS}h+) ›</div></div>
+        <div className="stat clk" onClick={() => onNav("open")} title="View all open requests"><div className="v">{open.length}</div><div className="l">Open Requests ›</div></div>
       </div>
       <div className="card">
         <b style={{ display: "block", marginBottom: 10 }}>Needs a response</b>
@@ -1804,6 +1834,7 @@ export default function App() {
   const [contractors, setContractors] = useState([]);
   const [staff, setStaff] = useState([]); // admin/staff logins (managed on the Team page)
   const [menuOpen, setMenuOpen] = useState(false); // mobile slide-in nav drawer
+  const [reqFilter, setReqFilter] = useState("all"); // seeds the Requests list filter (set by dashboard tiles)
   const [cart, setCart] = useState([]);
   const [selReq, setSelReq] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -1927,6 +1958,8 @@ export default function App() {
     setPage(u.role === "admin" ? "dashboard" : "shop");
   };
   const logout = () => { localStorage.removeItem("ftp_session"); setSession(null); setMustChangePw(false); setCart([]); setSelReq(null); setPage("home"); };
+  // Dashboard tile → jump to the Requests list pre-filtered (new / pending / overdue / open).
+  const goRequests = (status) => { setReqFilter(status); setSelReq(null); setPage("requests"); setMenuOpen(false); };
 
   // ── cart ops ──
   const addProduct = (p, qty) => {
@@ -1939,10 +1972,10 @@ export default function App() {
     const description = cf.description || (isSheet
       ? customDescription(cf.flashing_type, cf.material_code, cf.params, cf.piece_length_ft, cf.girth)
       : membraneDescription(cf.flashing_type, cf.material_code, cf.params, !!cf.params.split));
-    const up = applyDisc(cf.price_per_piece);
+    const up = cf.price_per_piece == null ? null : applyDisc(cf.price_per_piece);
     setCart((c) => [...c, {
       key: uid(), kind: "custom", sku: cf.part_number, description,
-      unit: isSheet ? "pc" : "ea", qty: pieces, unit_price: up, line_total: Math.round(up * pieces * 100) / 100,
+      unit: isSheet ? "pc" : "ea", qty: pieces, unit_price: up, line_total: up == null ? null : Math.round(up * pieces * 100) / 100,
       detail: { flashing_type: cf.flashing_type, material_code: cf.material_code, params: cf.params, girth: cf.girth, piece_length_ft: cf.piece_length_ft },
     }]);
     flash(`Added ${pieces} ${isSheet ? "pcs" : "ea"} ${cf.part_number}`);
@@ -2241,7 +2274,7 @@ export default function App() {
           <div className="logo"><img src="/ft-logo.png" alt="Flash-Tech Mfg, Inc." style={{ width: "100%", display: "block" }} /><small style={{ marginTop: 6 }}>Contractor Portal</small></div>
           <nav>
             {nav.map(([id, label, icon]) => (
-              <button key={id} className={page === id ? "on" : ""} onClick={() => { setPage(id); setSelReq(null); setMenuOpen(false); }}>
+              <button key={id} className={page === id ? "on" : ""} onClick={() => { setPage(id); setSelReq(null); setMenuOpen(false); if (id === "requests") setReqFilter("all"); }}>
                 {icon}<span>{label}</span>
                 {id === "cart" && cart.length > 0 && <span className="n">{cart.length}</span>}
                 {id === "dashboard" && notifs.filter((n) => n.urgent).length > 0 && <span className="n">{notifs.filter((n) => n.urgent).length}</span>}
@@ -2269,7 +2302,7 @@ export default function App() {
           {toast && <div className="note">{toast}</div>}
           {dbError && <div className="banner">{IC.alert}<div><b>Database tables not found.</b> Run database-setup.sql in your Supabase SQL editor, then reload.</div></div>}
 
-          {page === "dashboard" && isAdmin && <AdminDashboard requests={requests} msgs={msgs} contractorsById={contractorsById} onOpen={openRequest} />}
+          {page === "dashboard" && isAdmin && <AdminDashboard requests={requests} msgs={msgs} contractorsById={contractorsById} onOpen={openRequest} onNav={goRequests} />}
           {page === "customers" && isAdmin && <AdminCustomers contractors={contractors} requests={requests} onSave={saveContractor} onDelete={deleteContractor} onCreate={createContractor} onNotify={notifyContractor} />}
           {page === "team" && isAdmin && <AdminUsers users={staff} meId={session.id} onCreate={createUser} onSave={saveUser} onDelete={deleteUser} />}
           {page === "downloads" && <DownloadsPage />}
@@ -2285,7 +2318,7 @@ export default function App() {
               contractor={isAdmin ? contractorsById[curReq.contractor_id] : null} user={session}
               onBack={() => setSelReq(null)} onSend={sendMsg} onStatus={setStatus} onQuoteTotal={setQuoteTotal} onDelete={isAdmin ? deleteRequest : null} onSaveQuote={isAdmin ? saveQuote : null} onQbQueue={isAdmin ? setQbQueue : null} />
           ) : (
-            <RequestList requests={requests} msgs={msgs} role={role} contractorsById={contractorsById} onOpen={openRequest} onStatus={setStatus} onDelete={deleteRequest} />
+            <RequestList requests={requests} msgs={msgs} role={role} contractorsById={contractorsById} onOpen={openRequest} onStatus={setStatus} onDelete={deleteRequest} initialStatus={reqFilter} />
           ))}
         </main>
       </div>
