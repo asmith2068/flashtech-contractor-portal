@@ -646,15 +646,16 @@ export const piecePrice = (girth, bends, lengthFt, matCode) => {
 };
 
 // ─── Coping add-ons: cleats + splice plates (galvanized) ───
-// Full-length cleat is priced like a galvanized-26ga piece at HALF the coping's
+// Full-length cleat is priced like a galvanized-26ga piece at ONE-THIRD the coping's
 // stretch-out (per Flash-Tech). Segmented cleats and splice plates use the
-// tunable factors below — confirm these two numbers.
+// tunable factors below.
 const CLEAT_G26_RATE = 3.70;      // galvanized 26ga stretch rate ($/in stretch on a 10' piece)
-const SEG_CLEAT_FACTOR = 0.5;     // segmented cleats ≈ this × a full-length cleat  (CONFIRM)
+const CLEAT_STRETCH_DIV = 3;      // full-length cleat uses coping stretch-out / this
+const SEG_CLEAT_FACTOR = 0.5;     // segmented cleats ≈ this × a full-length cleat
 const SPLICE_PLATE_EACH = 10.00;  // $ per splice plate, one per coping piece (flat)
 export const copingExtras = (p, girth, lengthFt) => {
   if (!p) return { cleat: 0, splice: 0, total: 0 };
-  const cleatFull = Math.round((Math.max(0, girth) / 2) * CLEAT_G26_RATE * (lengthFt / 10) * 100) / 100;
+  const cleatFull = Math.round((Math.max(0, girth) / CLEAT_STRETCH_DIV) * CLEAT_G26_RATE * (lengthFt / 10) * 100) / 100;
   const cleat = p.cleat === "full" ? cleatFull : p.cleat === "segmented" ? Math.round(cleatFull * SEG_CLEAT_FACTOR * 100) / 100 : 0;
   const splice = p.splice === "no" ? 0 : SPLICE_PLATE_EACH;
   return { cleat, splice, total: Math.round((cleat + splice) * 100) / 100 };
