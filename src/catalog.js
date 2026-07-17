@@ -206,10 +206,14 @@ export const drawingsByCategory = (cat) => DRAWINGS.filter((d) => d.category ===
 // public/datasheets/ and adding a row here.
 export const DATASHEETS = [
   { id: "conical-boot", title: "Conical Pipe Boot (1–6\")", file: "/datasheets/conical-boot.pdf", category: "Pipe Boots & Flashings", note: "FT-1001 · TPO/PVC" },
+  { id: "pipe-flashing", title: "Pipe Flashing (Straight-Wall)", file: "/datasheets/pipe-flashing.pdf", category: "Pipe Boots & Flashings", note: "FT-1013 · TPO/PVC" },
+  { id: "square-wrap", title: "Square Wrap (4\")", file: "/datasheets/square-wrap.pdf", category: "Pipe Boots & Flashings", note: "FT-1020 · TPO/PVC" },
   { id: "drip-edge", title: "Clad-Metal Drip Edge (3×3)", file: "/datasheets/drip-edge.pdf", category: "Edge Metal", note: "FTE-1001 · TPO/PVC" },
   { id: "bowl-drain", title: "Bowl Drain (3\")", file: "/datasheets/bowl-drain.pdf", category: "Drains", note: "FT-1037/1040 · TPO/PVC" },
   { id: "scupper", title: "Through-Wall Scupper Drain", file: "/datasheets/scupper.pdf", category: "Scuppers", note: "FTD-1001 · TPO/PVC" },
   { id: "gravity-vent", title: "Gravity Vent (12\")", file: "/datasheets/gravity-vent.pdf", category: "Vents", note: "FTG-1001 · TPO/PVC" },
+  { id: "t-top-vent", title: "T-Top Vent (4\")", file: "/datasheets/t-top-vent.pdf", category: "Vents", note: "FTT-1001 · TPO/PVC" },
+  { id: "breather-vent", title: "Breather Vent (4\")", file: "/datasheets/breather-vent.pdf", category: "Vents", note: "FTV-1004/1013 · TPO/PVC" },
   { id: "sealant-pocket", title: "Sealant Pocket (4\")", file: "/datasheets/sealant-pocket.pdf", category: "Sealant Pockets & Ovals", note: "FTP-1005 · TPO/PVC" },
   { id: "solar-anchor", title: "Solar Anchor Boot", file: "/datasheets/solar-anchor.pdf", category: "Corners & Accessories", note: "FTA-1018/1019 · TPO/PVC" },
 ];
