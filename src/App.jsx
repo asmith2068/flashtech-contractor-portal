@@ -8,7 +8,7 @@ import {
   membranePrice, membranePartNumber, membraneDescription,
   scupperPrice, scupperPartNumber, scupperSides, scupperTier, productImage, POPULAR_SKUS,
   customProfilePoints, panPrice, panPartNumber, panDescription, panBlank, partDXF,
-  DRAWINGS, drawingsByCategory,
+  DRAWINGS, drawingsByCategory, copingExtras,
 } from "./catalog.js";
 
 // ─── UTILITIES ───────────────────────────────────────────────
@@ -923,10 +923,13 @@ function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc =
   const split = !!vp.split;
   const isScupper = !isSheet && geo && geo.shape === "scupper";
 
-  const perPiece = isPan ? panPrice(vp, matCode)
+  const basePiece = isPan ? panPrice(vp, matCode)
     : isSheet ? piecePrice(girth, bends, effLen, matCode)
     : isScupper ? scupperPrice(geo, matCode)
     : membranePrice(geo, matCode, split, vp.mil);
+  // Coping cleats + splice plates add cost on top of the coping profile.
+  const coping = (typeId === "coping" && !isPan) ? copingExtras(vp, girth, effLen) : { cleat: 0, splice: 0, total: 0 };
+  const perPiece = basePiece == null ? null : Math.round((basePiece + coping.total) * 100) / 100;
   const perLF = (isSheet && !isPan && perPiece != null) ? Math.round((perPiece / effLen) * 100) / 100 : null;
   const partNo = isPan ? panPartNumber(matCode, vp)
     : isSheet ? customPartNumber(typeId, matCode, girth)
@@ -1120,6 +1123,8 @@ function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc =
           </>) : isSheet ? (<>
             <div><span>Stretch-Out</span><b>{girth}"</b></div>
             <div><span>Bends</span><b>{bends}</b></div>
+            {coping.cleat > 0 && <div><span>Cleat</span><b>+{priceTxt(coping.cleat)}</b></div>}
+            {coping.splice > 0 && <div><span>Splice Plates</span><b>+{priceTxt(coping.splice)}</b></div>}
             <div><span>Per Piece ({effLen}')</span><b>{priceTxt(perPiece)}</b></div>
             <div><span>Per Lin. Ft</span><b>{priceTxt(perLF)}</b></div>
             <div><span>{pieces} pcs ({pieces * effLen} LF)</span><b>{priceTxt(total)}</b></div>
