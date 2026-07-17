@@ -1710,6 +1710,7 @@ function UserForm({ user, meId, onClose, onSave, onDelete, onCreate }) {
 // ─── DOWNLOADS: shop drawings for submittals ─────────────────
 function DownloadsPage() {
   const [tab, setTab] = useState("drawings"); // 'drawings' | 'datasheets'
+  const [view, setView] = useState(null); // { file, title } — in-app PDF viewer
   const [q, setQ] = useState("");
   const term = q.trim().toLowerCase();
   const source = tab === "datasheets" ? DATASHEETS : DRAWINGS;
@@ -1749,13 +1750,23 @@ function DownloadsPage() {
                 </div>
                 <div className="row" style={{ gap: 8, marginTop: 4 }}>
                   <a className="btn btn-p btn-sm" href={d.file} download style={{ textDecoration: "none" }}>{IC.download}&nbsp;Download PDF</a>
-                  <a className="btn btn-o btn-sm" href={d.file} target="_blank" rel="noreferrer" style={{ textDecoration: "none" }}>View</a>
+                  <button className="btn btn-o btn-sm" onClick={() => setView({ file: d.file, title: d.title })}>View</button>
                 </div>
               </div>
             ))}
           </div>
         </div>
       ))}
+      {view && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "#0b0d0b", display: "flex", flexDirection: "column" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", paddingTop: "calc(10px + env(safe-area-inset-top))", background: "var(--dark)", borderBottom: "2px solid var(--grn)" }}>
+            <button className="btn btn-p btn-sm" onClick={() => setView(null)}>{IC.back}&nbsp;Back</button>
+            <b style={{ color: "#fff", flex: 1, textAlign: "center", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontSize: 14 }}>{view.title}</b>
+            <a className="btn btn-o btn-sm" href={view.file} download style={{ textDecoration: "none" }}>{IC.download}</a>
+          </div>
+          <iframe title={view.title} src={view.file} style={{ flex: 1, width: "100%", border: "none", background: "#fff" }} />
+        </div>
+      )}
     </div>
   );
 }
