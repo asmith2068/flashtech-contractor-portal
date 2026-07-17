@@ -8,7 +8,7 @@ import {
   membranePrice, membranePartNumber, membraneDescription,
   scupperPrice, scupperPartNumber, scupperSides, scupperTier, productImage, POPULAR_SKUS,
   customProfilePoints, panPrice, panPartNumber, panDescription, panBlank, partDXF,
-  DRAWINGS, drawingsByCategory, copingExtras,
+  DRAWINGS, drawingsByCategory, copingExtras, DATASHEETS,
 } from "./catalog.js";
 
 // ─── UTILITIES ───────────────────────────────────────────────
@@ -1709,20 +1709,31 @@ function UserForm({ user, meId, onClose, onSave, onDelete, onCreate }) {
 
 // ─── DOWNLOADS: shop drawings for submittals ─────────────────
 function DownloadsPage() {
+  const [tab, setTab] = useState("drawings"); // 'drawings' | 'datasheets'
   const [q, setQ] = useState("");
   const term = q.trim().toLowerCase();
-  const list = term ? DRAWINGS.filter((d) => (d.title + " " + d.category + " " + (d.note || "")).toLowerCase().includes(term)) : DRAWINGS;
+  const source = tab === "datasheets" ? DATASHEETS : DRAWINGS;
+  const list = term ? source.filter((d) => (d.title + " " + d.category + " " + (d.note || "")).toLowerCase().includes(term)) : source;
   // group by category
   const cats = [...new Set(list.map((d) => d.category))];
+  const tabBtn = (id, label) => (
+    <button className={`btn btn-sm ${tab === id ? "btn-p" : "btn-o"}`} onClick={() => setTab(id)} style={{ minWidth: 120, justifyContent: "center" }}>{label}</button>
+  );
   return (
     <div>
+      <div className="row" style={{ gap: 8, marginBottom: 14 }}>
+        {tabBtn("drawings", "Shop Drawings")}
+        {tabBtn("datasheets", "Data Sheets")}
+      </div>
       <div className="banner" style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", color: "#166534" }}>
-        {IC.file}<div><b>Shop drawings for submittals.</b> Download the PDF for any product to include in your submittal package. Need one that isn't here yet? Ask your Flash-Tech rep.</div>
+        {IC.file}<div>{tab === "datasheets"
+          ? <><b>Product data sheets.</b> Specs, features and part numbers for our catalog products — download for submittals or reference. More added over time.</>
+          : <><b>Shop drawings for submittals.</b> Download the PDF for any product to include in your submittal package. Need one that isn't here yet? Ask your Flash-Tech rep.</>}</div>
       </div>
       <div className="fld" style={{ maxWidth: 360, marginBottom: 18 }}>
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search shop drawings…" />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={tab === "datasheets" ? "Search data sheets…" : "Search shop drawings…"} />
       </div>
-      {list.length === 0 && <div className="card" style={{ color: "var(--mut)" }}>No shop drawings match “{q}”.</div>}
+      {list.length === 0 && <div className="card" style={{ color: "var(--mut)" }}>Nothing matches “{q}”.</div>}
       {cats.map((cat) => (
         <div key={cat} style={{ marginBottom: 22 }}>
           <h3 style={{ fontSize: 15, marginBottom: 10, color: "var(--mut)", textTransform: "uppercase", letterSpacing: ".04em" }}>{cat}</h3>

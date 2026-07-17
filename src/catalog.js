@@ -201,6 +201,19 @@ export const DRAWINGS = [
 ];
 export const drawingsByCategory = (cat) => DRAWINGS.filter((d) => d.category === cat);
 
+// ─── PRODUCT DATA SHEETS (PDFs in /public/datasheets/) ───
+// One per product family; original Flash-Tech copy. Add more by dropping a PDF in
+// public/datasheets/ and adding a row here.
+export const DATASHEETS = [
+  { id: "conical-boot", title: "Conical Pipe Boot (1–6\")", file: "/datasheets/conical-boot.pdf", category: "Pipe Boots & Flashings", note: "FT-1001 · TPO/PVC" },
+  { id: "drip-edge", title: "Clad-Metal Drip Edge (3×3)", file: "/datasheets/drip-edge.pdf", category: "Edge Metal", note: "FTE-1001 · TPO/PVC" },
+  { id: "bowl-drain", title: "Bowl Drain (3\")", file: "/datasheets/bowl-drain.pdf", category: "Drains", note: "FT-1037/1040 · TPO/PVC" },
+  { id: "scupper", title: "Through-Wall Scupper Drain", file: "/datasheets/scupper.pdf", category: "Scuppers", note: "FTD-1001 · TPO/PVC" },
+  { id: "gravity-vent", title: "Gravity Vent (12\")", file: "/datasheets/gravity-vent.pdf", category: "Vents", note: "FTG-1001 · TPO/PVC" },
+  { id: "sealant-pocket", title: "Sealant Pocket (4\")", file: "/datasheets/sealant-pocket.pdf", category: "Sealant Pockets & Ovals", note: "FTP-1005 · TPO/PVC" },
+  { id: "solar-anchor", title: "Solar Anchor Boot", file: "/datasheets/solar-anchor.pdf", category: "Corners & Accessories", note: "FTA-1018/1019 · TPO/PVC" },
+];
+
 // Product photos from flash-techinc.com (mapped by description keywords).
 // Returns a thumbnail URL, or null when there's no matching photo.
 const FT_IMG = "https://flash-techinc.com/wp-content/uploads";
