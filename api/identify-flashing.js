@@ -2,6 +2,22 @@
 // Claude's vision API. The API key stays server-side (set ANTHROPIC_API_KEY in
 // Vercel env vars). Safely no-ops if the key isn't configured.
 import Anthropic from "@anthropic-ai/sdk";
+import crypto from "crypto";
+
+// Signed-in users only — otherwise anyone could burn the Anthropic key.
+const SECRET = process.env.SESSION_SECRET || "";
+function verifyToken(token) {
+  if (!token || !SECRET) return null;
+  const [body, sig] = String(token).split(".");
+  if (!body || !sig) return null;
+  const expect = crypto.createHmac("sha256", SECRET).update(body).digest("base64url");
+  const a = Buffer.from(sig), b = Buffer.from(expect);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  try {
+    const p = JSON.parse(Buffer.from(body, "base64url").toString());
+    return !p.exp || Date.now() > p.exp ? null : p;
+  } catch { return null; }
+}
 
 // Builder type IDs the photo can map to (must match FLASHING_TYPES in src/catalog.js).
 const TYPES = [
@@ -27,6 +43,7 @@ export default async function handler(req, res) {
   try {
     const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : (req.body || {});
     const { imageBase64, mediaType } = body;
+    if (!verifyToken(body.token)) return res.status(401).json({ error: "Sign in required." });
     if (!imageBase64) return res.status(400).json({ error: "Missing imageBase64" });
 
     const client = new Anthropic({ apiKey: key });

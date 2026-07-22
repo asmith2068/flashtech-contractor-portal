@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import { supabase, hasSupabase } from "./supabaseClient.js";
+import { api, getToken, setToken } from "./api.js";
 import Flashing3D from "./Flashing3D.jsx";
 import SinglePly3D from "./SinglePly3D.jsx";
 import {
@@ -26,19 +26,16 @@ const ageLabel = (iso) => {
 };
 const uid = () => Math.random().toString(36).slice(2, 10);
 
-async function sha256(text) {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
-  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
 // ─── EMAIL (posts to the /api/send-email serverless function; safely no-ops if not configured) ───
+// Passwords are hashed on the server now — the browser never hashes or stores one.
 const PORTAL_URL = "https://flashtech-contractor-portal.vercel.app";
 // TEMP: pointed at asmith@ so alerts deliver in Resend test mode. Switch back to
 // sales@flash-techinc.com once the flash-techinc.com domain is verified in Resend.
 const NOTIFY_EMAIL = "asmith@flash-techinc.com"; // where new-request alerts are sent
 async function sendMail(to, subject, html, replyTo) {
   if (!to) return;
-  try { await fetch("/api/send-email", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ to, subject, html, replyTo }) }); }
+  // The session token is required by the mail function so it can't be used as an open relay.
+  try { await fetch("/api/send-email", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ to, subject, html, replyTo, token: getToken() }) }); }
   catch (e) { console.error("email send failed", e); }
 }
 const emailShell = (heading, inner) => `<div style="font-family:Arial,Helvetica,sans-serif;background:#f2f3f2;padding:24px"><div style="max-width:560px;margin:0 auto;background:#fff;border:1px solid #e1e4e1">
@@ -398,7 +395,7 @@ function Bell({ items, onPick }) {
 // ─── LOGIN / REGISTER ────────────────────────────────────────
 function LoginScreen({ onLogin, onGuest, dbError }) {
   const [tab, setTab] = useState("in");
-  const [f, setF] = useState({ email: "", password: "", name: "", company: "", phone: "", distributor: "", salesRep: "" });
+  const [f, setF] = useState({ email: "", password: "", name: "", company: "", phone: "", distributor: "", salesRep: "", pin: "" });
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [forgot, setForgot] = useState(false);
@@ -410,15 +407,10 @@ function LoginScreen({ onLogin, onGuest, dbError }) {
     const em = forgotEmail.trim().toLowerCase();
     if (!em) return;
     setForgotMsg("sending");
-    try {
-      const { data } = await supabase.from("portal_users").select("id").eq("email", em).maybeSingle();
-      if (data) {
-        const token = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36);
-        await supabase.from("portal_users").update({ reset_token: token, reset_expires: new Date(Date.now() + 3600000).toISOString() }).eq("id", data.id);
-        const link = `${window.location.origin}/?reset=${token}`;
-        await sendMail(em, "Reset your Flash-Tech password", emailShell("Password Reset", `<p>We received a request to reset your Flash-Tech Portal password. This link is valid for 1 hour:</p>${mailBtn("Reset My Password", link)}<p style="font-size:12px;color:#6a7278;margin-top:14px">If you didn't request this, you can safely ignore this email.</p>`), NOTIFY_EMAIL);
-      }
-    } catch (e) { /* show generic message regardless */ }
+    // The server looks up the account, issues the token and sends the email — the
+    // browser is never told whether that address has an account.
+    try { await api("requestReset", { email: em, origin: window.location.origin }); }
+    catch (e) { /* show the same generic message regardless */ }
     setForgotMsg("sent");
   };
 
@@ -426,23 +418,24 @@ function LoginScreen({ onLogin, onGuest, dbError }) {
     e.preventDefault();
     setErr(""); setBusy(true);
     try {
-      if (!hasSupabase) throw new Error("Database not configured. Add your Supabase keys to .env.local.");
-      const hash = await sha256(f.password);
+      // Credentials go to the server, which does the hashing, the PIN check and
+      // the account creation, then hands back a signed session token.
       if (tab === "in") {
-        const { data, error } = await supabase.from("portal_users").select("*").eq("email", f.email.trim().toLowerCase()).maybeSingle();
-        if (error) throw new Error(error.message.includes("does not exist") ? "Database tables not set up yet — run database-setup.sql in Supabase." : error.message);
-        if (!data || data.password_hash !== hash) throw new Error("Wrong email or password.");
-        onLogin(data);
+        const { token, user } = await api("login", { email: f.email.trim().toLowerCase(), password: f.password });
+        setToken(token);
+        onLogin(user);
       } else {
         if (!f.name.trim()) throw new Error("Please enter your name.");
         if (!f.company.trim()) throw new Error("Please enter your company name.");
-        if (!f.distributor.trim()) throw new Error("Please enter your distributor (who you order through).");
+        if (!f.pin.trim() && !f.distributor.trim()) throw new Error("Please enter your distributor (who you order through), or the sign-up PIN they gave you.");
         if (!f.email.trim()) throw new Error("Please enter your email.");
         if (f.password.length < 4) throw new Error("Password must be at least 4 characters.");
-        const row = { email: f.email.trim().toLowerCase(), password_hash: hash, name: f.name, company: f.company, phone: f.phone, distributor: f.distributor, sales_rep: f.salesRep, role: "contractor" };
-        const { data, error } = await supabase.from("portal_users").insert(row).select().single();
-        if (error) throw new Error(error.code === "23505" ? "An account with that email already exists." : error.message);
-        onLogin(data);
+        const { token, user } = await api("signup", {
+          password: f.password, pin: f.pin.trim(),
+          fields: { email: f.email.trim().toLowerCase(), name: f.name, company: f.company, phone: f.phone, distributor: f.distributor, salesRep: f.salesRep },
+        });
+        setToken(token);
+        onLogin(user);
       }
     } catch (ex) { setErr(ex.message); }
     setBusy(false);
@@ -468,6 +461,10 @@ function LoginScreen({ onLogin, onGuest, dbError }) {
             <div className="g2">
               <div className="fld"><label>Distributor</label><input value={f.distributor} onChange={set("distributor")} placeholder="ABC Supply, SRS, Beacon…" /></div>
               <div className="fld"><label>Sales Rep (optional)</label><input value={f.salesRep} onChange={set("salesRep")} placeholder="Rep name" /></div>
+            </div>
+            <div className="fld"><label>Distributor Sign-Up PIN (optional)</label>
+              <input value={f.pin} onChange={set("pin")} placeholder="e.g. 7K4M2P" style={{ textTransform: "uppercase", letterSpacing: ".12em", fontWeight: 700 }} />
+              <div style={{ fontSize: 12, color: "var(--mut)", marginTop: 4 }}>If your distributor gave you a PIN, enter it here — your account will be linked to them.</div>
             </div>
           </>)}
           <div className="fld"><label>{tab === "in" ? "Email or Username" : "Email"}</label><input type={tab === "in" ? "text" : "email"} value={f.email} onChange={set("email")} placeholder={tab === "in" ? "you@company.com" : "you@company.com"} /></div>
@@ -1191,7 +1188,7 @@ function MyPartsPage({ parts, onAdd, onDel, disc = (x) => x }) {
 
 // ─── CART / SUBMIT REQUEST ───────────────────────────────────
 const MEMBRANE_MFRS = ["Carlisle SynTec", "Elevate (Firestone)", "GAF", "Johns Manville", "Versico", "Mule-Hide", "IB Roof Systems", "Sika Sarnafil", "FiberTite", "Other / not sure", "N/A — metal only"];
-function CartPage({ cart, onRemove, onClear, onSubmit, busy, user }) {
+function CartPage({ cart, onRemove, onClear, onSubmit, busy, user, forCustomer = null, needsCustomer = false }) {
   const [meta, setMeta] = useState({ req_type: "quote", job_name: "", po_number: "", needed_by: "", membrane_mfr: "", metal_color: "", notes: "" });
   const subtotal = cart.reduce((s, i) => s + (i.line_total || 0), 0);
   const hasByRequest = cart.some((i) => i.line_total == null);
@@ -1206,10 +1203,17 @@ function CartPage({ cart, onRemove, onClear, onSubmit, busy, user }) {
     const notes = [spec, meta.notes.trim()].filter(Boolean).join("\n\n");
     onSubmit({ ...meta, notes }, subtotal);
   };
+  if (needsCustomer) return <div className="card" style={{ color: "var(--mut)" }}>Pick which customer you're working for in the left sidebar, then add parts to build their request.</div>;
   if (!cart.length) return <div className="card" style={{ color: "var(--mut)" }}>Your cart is empty — add parts from the Catalog or the Custom Flashing Builder.</div>;
   return (
     <div className="g2" style={{ gridTemplateColumns: "1.4fr 1fr", alignItems: "start" }}>
       <div className="card">
+        {forCustomer && (
+          <div className="note" style={{ marginBottom: 12 }}>
+            Sending this on behalf of <b>{forCustomer.company || forCustomer.name}</b>
+            {Number(forCustomer.discount_pct) > 0 ? ` — their ${forCustomer.discount_pct}% account discount is applied.` : "."}
+          </div>
+        )}
         <table><thead><tr><th>Part</th><th>Qty</th><th>Price</th><th>Total</th><th></th></tr></thead>
           <tbody>
             {cart.map((i) => (
@@ -1265,9 +1269,17 @@ function CartPage({ cart, onRemove, onClear, onSubmit, busy, user }) {
 }
 
 // ─── REQUEST DETAIL (shared contractor/admin) ────────────────
-function RequestDetail({ req, items, msgs, role, contractor, user, onBack, onSend, onStatus, onQuoteTotal, onDelete, onSaveQuote, onQbQueue }) {
+function RequestDetail({ req, items, msgs, role, contractor, user, onBack, onSend, onStatus, onQuoteTotal, onDelete, onSaveQuote, onQbQueue, onConvert, onRevert }) {
   const [body, setBody] = useState("");
   const [quote, setQuote] = useState(req.admin_quote_total || "");
+  const [po, setPo] = useState(req.po_number || "");
+  const [converting, setConverting] = useState(false);
+  const convert = async () => {
+    if (!window.confirm("Convert this quote to an order? Flash-Tech will be notified to begin processing it.")) return;
+    setConverting(true);
+    await onConvert(req, po);
+    setConverting(false);
+  };
   const qbStatus = req.qb_status || "none";
   const qb = QB_META[qbStatus] || QB_META.none;
   const myItems = items.filter((i) => i.request_id === req.id);
@@ -1394,6 +1406,18 @@ function RequestDetail({ req, items, msgs, role, contractor, user, onBack, onSen
                   </div>
                 </div>
               </div>
+              {onConvert && (
+                <div style={{ marginTop: 14, borderTop: "1px solid var(--line)", paddingTop: 12 }}>
+                  <label style={{ display: "block", fontSize: 12, color: "var(--mut)", marginBottom: 6, fontWeight: 700 }}>Request Type</label>
+                  <div className="row" style={{ gap: 10, alignItems: "center" }}>
+                    <TypeBadge t={req.req_type} />
+                    {req.req_type === "quote"
+                      ? <button className="btn btn-p btn-sm" onClick={convert} disabled={converting}>{IC.cart}&nbsp;{converting ? "Converting..." : "Convert to Order"}</button>
+                      : onRevert && <button className="btn btn-o btn-sm" onClick={() => onRevert(req)}>Change back to Quote</button>}
+                  </div>
+                  {req.req_type === "quote" && <small style={{ color: "var(--mut)" }}>Notifies the customer and unlocks the QuickBooks push.</small>}
+                </div>
+              )}
               {onQbQueue && (
                 <div style={{ marginTop: 14, borderTop: "1px solid var(--line)", paddingTop: 12 }}>
                   <label style={{ display: "block", fontSize: 12, color: "var(--mut)", marginBottom: 6, fontWeight: 700 }}>QuickBooks</label>
@@ -1423,6 +1447,28 @@ function RequestDetail({ req, items, msgs, role, contractor, user, onBack, onSen
                   <button className="btn btn-d btn-sm" onClick={() => onDelete(req)}>{IC.trash}&nbsp;Delete Request</button>
                 </div>
               )}
+            </div>
+          )}
+          {role !== "admin" && onConvert && req.req_type === "quote" && req.status !== "closed" && (
+            <div className="card" style={{ marginBottom: 14, borderLeft: "3px solid var(--grn)" }}>
+              <b style={{ display: "block", marginBottom: 6 }}>Ready to order?</b>
+              <div style={{ fontSize: 13, color: "var(--mut)", marginBottom: 12 }}>
+                {req.admin_quote_total != null
+                  ? <>Accept Flash-Tech's quote of <b style={{ color: "var(--grn)" }}>{fmt(req.admin_quote_total)}</b> and turn this request into an order.</>
+                  : <>Turn this quote request into an order. Flash-Tech confirms final pricing before production.</>}
+              </div>
+              <div className="fld"><label>PO number (optional)</label>
+                <input value={po} onChange={(e) => setPo(e.target.value)} placeholder="Your PO #" />
+              </div>
+              <button className="btn btn-p" style={{ width: "100%", justifyContent: "center", marginTop: 4 }} disabled={converting} onClick={convert}>
+                {IC.cart}&nbsp;{converting ? "Converting..." : "Convert Quote to Order"}
+              </button>
+            </div>
+          )}
+          {role !== "admin" && req.req_type === "order" && (
+            <div className="card" style={{ marginBottom: 14, borderLeft: "3px solid var(--grn)" }}>
+              <b style={{ display: "block", marginBottom: 4 }}>✅ This is an order</b>
+              <div style={{ fontSize: 13, color: "var(--mut)" }}>Flash-Tech is processing it{req.po_number ? <> under PO <b style={{ color: "var(--ink)" }}>{req.po_number}</b></> : ""}. Message us below with any changes.</div>
             </div>
           )}
           <div className="card">
@@ -1476,7 +1522,7 @@ function RequestList({ requests, msgs, role, contractorsById, onOpen, onStatus, 
       </div>
       <div style={{ overflowX: "auto" }}>
         <table><thead><tr>
-          <th>Req #</th>{role === "admin" && <th>Customer</th>}<th>Job</th><th>Type</th><th>Status</th><th>Est. Total</th>{role === "admin" && <th>QB</th>}<th>Submitted</th>{role === "admin" && <th></th>}
+          <th>Req #</th>{role !== "contractor" && <th>Customer</th>}<th>Job</th><th>Type</th><th>Status</th><th>Est. Total</th>{role === "admin" && <th>QB</th>}<th>Submitted</th>{role === "admin" && <th></th>}
         </tr></thead>
           <tbody>
             {list.map((r) => {
@@ -1484,7 +1530,7 @@ function RequestList({ requests, msgs, role, contractorsById, onOpen, onStatus, 
               return (
                 <tr key={r.id} className="click" onClick={() => onOpen(r)}>
                   <td style={{ fontWeight: 700 }}>#{r.id.slice(0, 8)}</td>
-                  {role === "admin" && <td>{contractorsById[r.contractor_id]?.company || "—"}</td>}
+                  {role !== "contractor" && <td>{contractorsById[r.contractor_id]?.company || "—"}</td>}
                   <td>{r.job_name || "—"}</td>
                   <td><TypeBadge t={r.req_type} /></td>
                   <td>{role === "admin"
@@ -1555,21 +1601,26 @@ function AdminDashboard({ requests, msgs, contractorsById, onOpen, onNav }) {
   );
 }
 
-function AdminCustomers({ contractors, requests, onSave, onDelete, onCreate, onNotify }) {
+function AdminCustomers({ contractors, requests, onSave, onDelete, onCreate, onNotify, distributors = [] }) {
   const [edit, setEdit] = useState(null);
   const [adding, setAdding] = useState(false);
+  const distById = Object.fromEntries(distributors.map((d) => [d.id, d]));
   return (
     <div className="card">
       <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
         <b>{contractors.length} contractor{contractors.length === 1 ? "" : "s"}</b>
         <button className="btn btn-p btn-sm" onClick={() => setAdding(true)}>{IC.plus}&nbsp;Add Contractor</button>
       </div>
-      <table><thead><tr><th>Company</th><th>Contact</th><th>Login</th><th>Phone</th><th>Distributor</th><th>Sales Rep</th><th>Disc %</th><th>Requests</th><th></th></tr></thead>
+      <table><thead><tr><th>Company</th><th>Contact</th><th>Login</th><th>Phone</th><th>Distributor</th><th>Portal Access</th><th>Sales Rep</th><th>Disc %</th><th>Requests</th><th></th></tr></thead>
         <tbody>
           {contractors.map((c) => (
             <tr key={c.id}>
               <td style={{ fontWeight: 700 }}>{c.company || "—"}</td><td>{c.name}</td><td>{c.email}</td><td>{c.phone || "—"}</td>
-              <td>{c.distributor || "—"}</td><td>{c.sales_rep || "—"}</td>
+              <td>{c.distributor || "—"}</td>
+              <td>{c.distributor_id
+                ? <span className="b b-order">{distById[c.distributor_id]?.company || distById[c.distributor_id]?.name || "Assigned"}</span>
+                : <small style={{ color: "var(--mut)" }}>Flash-Tech only</small>}</td>
+              <td>{c.sales_rep || "—"}</td>
               <td>{Number(c.discount_pct) > 0 ? <b style={{ color: "var(--grn-d)" }}>{c.discount_pct}%</b> : "—"}</td>
               <td>{requests.filter((r) => r.contractor_id === c.id).length}</td>
               <td style={{ whiteSpace: "nowrap", textAlign: "right" }}>
@@ -1578,19 +1629,19 @@ function AdminCustomers({ contractors, requests, onSave, onDelete, onCreate, onN
               </td>
             </tr>
           ))}
-          {contractors.length === 0 && <tr><td colSpan="9" style={{ color: "var(--mut)" }}>No contractor accounts yet.</td></tr>}
+          {contractors.length === 0 && <tr><td colSpan="10" style={{ color: "var(--mut)" }}>No contractor accounts yet.</td></tr>}
         </tbody>
       </table>
-      {edit && <ContractorForm contractor={edit} onClose={() => setEdit(null)} onSave={onSave} onDelete={onDelete} />}
-      {adding && <ContractorForm contractor={null} onClose={() => setAdding(false)} onCreate={onCreate} />}
+      {edit && <ContractorForm contractor={edit} onClose={() => setEdit(null)} onSave={onSave} onDelete={onDelete} distributors={distributors} />}
+      {adding && <ContractorForm contractor={null} onClose={() => setAdding(false)} onCreate={onCreate} distributors={distributors} />}
     </div>
   );
 }
 
-function ContractorForm({ contractor, onClose, onSave, onDelete, onCreate }) {
+function ContractorForm({ contractor, onClose, onSave, onDelete, onCreate, distributors = null, maxDiscount = 100 }) {
   const isNew = !contractor;
   const c = contractor || {};
-  const [f, setF] = useState({ name: c.name || "", company: c.company || "", email: c.email || "", phone: c.phone || "", distributor: c.distributor || "", sales_rep: c.sales_rep || "", discount_pct: c.discount_pct || 0 });
+  const [f, setF] = useState({ name: c.name || "", company: c.company || "", email: c.email || "", phone: c.phone || "", distributor: c.distributor || "", sales_rep: c.sales_rep || "", discount_pct: c.discount_pct || 0, distributor_id: c.distributor_id || "" });
   const [pw, setPw] = useState("");
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
@@ -1598,8 +1649,10 @@ function ContractorForm({ contractor, onClose, onSave, onDelete, onCreate }) {
     if (!f.name.trim() || !f.email.trim()) { alert("Name and login/email are required."); return; }
     if (isNew && pw.length < 4) { alert("Set a temporary password (at least 4 characters) for the contractor."); return; }
     if (!isNew && pw && pw.length < 4) { alert("New password must be at least 4 characters."); return; }
-    const dpct = Math.max(0, Math.min(100, Number(f.discount_pct) || 0));
+    if ((Number(f.discount_pct) || 0) > maxDiscount) { alert(`The most you can discount this account is ${maxDiscount}%.`); return; }
+    const dpct = Math.max(0, Math.min(maxDiscount, Number(f.discount_pct) || 0));
     const fields = { name: f.name, company: f.company, email: f.email.trim().toLowerCase(), phone: f.phone, distributor: f.distributor, sales_rep: f.sales_rep, discount_pct: dpct };
+    if (distributors) fields.distributor_id = f.distributor_id || null;
     setBusy(true);
     const ok = isNew ? await onCreate(fields, pw) : await onSave(contractor.id, fields, pw || null);
     setBusy(false);
@@ -1624,10 +1677,19 @@ function ContractorForm({ contractor, onClose, onSave, onDelete, onCreate }) {
         <div className="fld"><label>Distributor</label><input value={f.distributor} onChange={set("distributor")} /></div>
         <div className="fld"><label>Sales Rep</label><input value={f.sales_rep} onChange={set("sales_rep")} /></div>
       </div>
+      {distributors && (
+        <div className="fld"><label>Assigned Distributor Login</label>
+          <select value={f.distributor_id} onChange={set("distributor_id")}>
+            <option value="">None — Flash-Tech house account</option>
+            {distributors.map((d) => <option key={d.id} value={d.id}>{d.company || d.name} ({d.email})</option>)}
+          </select>
+          <div style={{ fontSize: 12, color: "var(--mut)", marginTop: 4 }}>The distributor login that can see this customer's quotes &amp; orders. Leave as “None” to keep it Flash-Tech only.</div>
+        </div>
+      )}
       <div className="fld" style={{ marginTop: 6, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
         <label>Account Discount (%)</label>
-        <input type="number" min="0" max="100" step="1" value={f.discount_pct} onChange={set("discount_pct")} placeholder="0" />
-        <div style={{ fontSize: 12, color: "var(--mut)", marginTop: 4 }}>This % comes off every price this contractor sees — catalog, builder, and their requests. Set by purchase level.</div>
+        <input type="number" min="0" max={maxDiscount} step="1" value={f.discount_pct} onChange={set("discount_pct")} placeholder="0" />
+        <div style={{ fontSize: 12, color: "var(--mut)", marginTop: 4 }}>This % comes off every price this contractor sees — catalog, builder, and their requests. Set by purchase level.{maxDiscount < 100 ? ` Your limit is ${maxDiscount}%.` : ""}</div>
       </div>
       <div className="fld">
         <label>{isNew ? "Temporary Password" : "Reset Password"}</label>
@@ -1648,19 +1710,21 @@ function AdminUsers({ users, meId, onCreate, onSave, onDelete }) {
         <b>{users.length} team member{users.length === 1 ? "" : "s"}</b>
         <button className="btn btn-p btn-sm" onClick={() => setAdding(true)}>{IC.plus}&nbsp;Add User</button>
       </div>
-      <div style={{ fontSize: 12, color: "var(--mut)", marginBottom: 12 }}>Staff logins with full admin access — dashboard, requests, customers, catalog and the builder.</div>
-      <table><thead><tr><th>Name</th><th>Login</th><th>Phone</th><th></th></tr></thead>
+      <div style={{ fontSize: 12, color: "var(--mut)", marginBottom: 12 }}>Flash-Tech staff logins (full admin access) and distributor logins (their own customers only).</div>
+      <table><thead><tr><th>Name</th><th>Role</th><th>Login</th><th>Phone</th><th>Max Disc %</th><th></th></tr></thead>
         <tbody>
           {users.map((u) => (
             <tr key={u.id}>
-              <td style={{ fontWeight: 700 }}>{u.name || "—"}{u.id === meId && <span className="b b-resp" style={{ marginLeft: 8 }}>You</span>}</td>
+              <td style={{ fontWeight: 700 }}>{u.name || "—"}{u.company && u.role === "distributor" ? <small style={{ display: "block", fontWeight: 400, color: "var(--mut)" }}>{u.company}</small> : null}{u.id === meId && <span className="b b-resp" style={{ marginLeft: 8 }}>You</span>}</td>
+              <td>{u.role === "distributor" ? <span className="b b-quote">Distributor</span> : <span className="b b-order">Flash-Tech</span>}</td>
               <td>{u.email}</td><td>{u.phone || "—"}</td>
+              <td>{u.role === "distributor" ? `${Number(u.max_discount_pct) || 0}%` : "—"}</td>
               <td style={{ whiteSpace: "nowrap", textAlign: "right" }}>
                 <button className="btn btn-o btn-sm" onClick={() => setEdit(u)}>Edit / Reset</button>
               </td>
             </tr>
           ))}
-          {users.length === 0 && <tr><td colSpan="4" style={{ color: "var(--mut)" }}>No team members yet.</td></tr>}
+          {users.length === 0 && <tr><td colSpan="6" style={{ color: "var(--mut)" }}>No team members yet.</td></tr>}
         </tbody>
       </table>
       {edit && <UserForm user={edit} meId={meId} onClose={() => setEdit(null)} onSave={onSave} onDelete={onDelete} />}
@@ -1672,7 +1736,7 @@ function AdminUsers({ users, meId, onCreate, onSave, onDelete }) {
 function UserForm({ user, meId, onClose, onSave, onDelete, onCreate }) {
   const isNew = !user;
   const u = user || {};
-  const [f, setF] = useState({ name: u.name || "", email: u.email || "", phone: u.phone || "" });
+  const [f, setF] = useState({ name: u.name || "", email: u.email || "", phone: u.phone || "", role: u.role || "admin", company: u.company || "", max_discount_pct: u.max_discount_pct || 0 });
   const [pw, setPw] = useState("");
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
@@ -1680,7 +1744,8 @@ function UserForm({ user, meId, onClose, onSave, onDelete, onCreate }) {
     if (!f.name.trim() || !f.email.trim()) { alert("Name and login/email are required."); return; }
     if (isNew && pw.length < 4) { alert("Set a temporary password (at least 4 characters) for this user."); return; }
     if (!isNew && pw && pw.length < 4) { alert("New password must be at least 4 characters."); return; }
-    const fields = { name: f.name.trim(), email: f.email.trim().toLowerCase(), phone: f.phone.trim() };
+    const fields = { name: f.name.trim(), email: f.email.trim().toLowerCase(), phone: f.phone.trim(), role: f.role,
+      company: f.company.trim() || null, max_discount_pct: f.role === "distributor" ? Math.max(0, Math.min(100, Number(f.max_discount_pct) || 0)) : 0 };
     setBusy(true);
     const ok = isNew ? await onCreate(fields, pw) : await onSave(user.id, fields, pw || null);
     setBusy(false);
@@ -1698,12 +1763,105 @@ function UserForm({ user, meId, onClose, onSave, onDelete, onCreate }) {
         <div className="fld"><label>Phone</label><input value={f.phone} onChange={set("phone")} /></div>
       </div>
       <div className="fld"><label>Login / Email</label><input value={f.email} onChange={set("email")} placeholder="e.g. andrew or andrew@flash-techinc.com" /></div>
+      <div className="fld"><label>Account Type</label>
+        <select value={f.role} onChange={set("role")}>
+          <option value="admin">Flash-Tech Staff — full admin access</option>
+          <option value="distributor">Distributor — only their own customers</option>
+        </select>
+        <div style={{ fontSize: 12, color: "var(--mut)", marginTop: 4 }}>
+          {f.role === "distributor"
+            ? "Sees only customers assigned to them (or signed up with their PIN): their quotes, orders, discounts, the catalog, builder and downloads."
+            : "Full Flash-Tech access — every customer, request, price and setting."}
+        </div>
+      </div>
+      {f.role === "distributor" && (
+        <div className="g2">
+          <div className="fld"><label>Distributor Company</label><input value={f.company} onChange={set("company")} placeholder="ABC Supply Co." /></div>
+          <div className="fld"><label>Max Discount They Can Give (%)</label>
+            <input type="number" min="0" max="100" step="1" value={f.max_discount_pct} onChange={set("max_discount_pct")} />
+          </div>
+        </div>
+      )}
       <div className="fld">
         <label>{isNew ? "Temporary Password" : "Reset Password"}</label>
         <input value={pw} onChange={(e) => setPw(e.target.value)} placeholder={isNew ? "Set a temporary password for this user" : "Type a new password to reset it (leave blank to keep current)"} />
         <div style={{ fontSize: 12, color: "var(--mut)", marginTop: 4 }}>{isNew ? "Give this to the new team member so they can sign in — they can change it later." : "Type a new password here to reset this user's login."}</div>
       </div>
     </Modal>
+  );
+}
+
+// ─── DISTRIBUTOR: MY CUSTOMERS + SIGN-UP PINS ────────────────
+// A distributor only ever sees customers linked to them — either assigned by a
+// Flash-Tech admin, created here, or signed up with one of their PINs.
+function DistributorCustomers({ me, contractors, requests, invites, onSave, onCreate, onNotify, onGenPin, onRevokePin }) {
+  const [edit, setEdit] = useState(null);
+  const [adding, setAdding] = useState(false);
+  const [label, setLabel] = useState("");
+  const [busy, setBusy] = useState(false);
+  const maxD = Number(me.max_discount_pct) || 0;
+  const now = Date.now();
+  const live = invites.filter((i) => !i.used_at && (!i.expires_at || new Date(i.expires_at).getTime() > now));
+  const used = invites.filter((i) => i.used_at);
+  const gen = async () => { setBusy(true); await onGenPin(label.trim()); setLabel(""); setBusy(false); };
+  const copy = (code) => { try { navigator.clipboard.writeText(code); } catch (e) {} };
+  return (
+    <div className="g2" style={{ gridTemplateColumns: "1.5fr 1fr", alignItems: "start" }}>
+      <div className="card">
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
+          <b>{contractors.length} customer{contractors.length === 1 ? "" : "s"}</b>
+          <button className="btn btn-p btn-sm" onClick={() => setAdding(true)}>{IC.plus}&nbsp;Add Customer Login</button>
+        </div>
+        <table><thead><tr><th>Company</th><th>Contact</th><th>Login</th><th>Disc %</th><th>Requests</th><th></th></tr></thead>
+          <tbody>
+            {contractors.map((c) => (
+              <tr key={c.id}>
+                <td style={{ fontWeight: 700 }}>{c.company || "—"}</td><td>{c.name}</td><td>{c.email}</td>
+                <td>{Number(c.discount_pct) > 0 ? <b style={{ color: "var(--grn-d)" }}>{c.discount_pct}%</b> : "—"}</td>
+                <td>{requests.filter((r) => r.contractor_id === c.id).length}</td>
+                <td style={{ whiteSpace: "nowrap", textAlign: "right" }}>
+                  <button className="btn btn-p btn-sm" title="Email this customer their login details" style={{ marginRight: 6 }} onClick={() => onNotify(c)}>{IC.send}&nbsp;Notify</button>
+                  <button className="btn btn-o btn-sm" onClick={() => setEdit(c)}>Edit / Reset</button>
+                </td>
+              </tr>
+            ))}
+            {contractors.length === 0 && <tr><td colSpan="6" style={{ color: "var(--mut)" }}>No customers yet — add one, or send a customer a sign-up PIN.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      <div className="card">
+        <b style={{ display: "block", marginBottom: 4 }}>Customer sign-up PINs</b>
+        <div style={{ fontSize: 13, color: "var(--mut)", marginBottom: 12 }}>
+          Generate a PIN and give it to your customer. When they create their account they enter it, which links them to you. Each PIN works once and expires in 30 days.
+        </div>
+        <div className="fld"><label>Who is this PIN for? (optional)</label>
+          <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Rivera Roofing LLC" />
+        </div>
+        <button className="btn btn-p" style={{ width: "100%", justifyContent: "center", marginBottom: 14 }} disabled={busy} onClick={gen}>
+          {IC.plus}&nbsp;{busy ? "Generating…" : "Generate a PIN"}
+        </button>
+        {live.map((i) => (
+          <div key={i.id} style={{ border: "1px solid var(--line)", padding: "10px 12px", marginBottom: 8, background: "#f0fdf4" }}>
+            <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+              <b style={{ fontFamily: "Consolas,monospace", fontSize: 20, letterSpacing: ".16em" }}>{i.code}</b>
+              <span style={{ whiteSpace: "nowrap" }}>
+                <button className="btn btn-o btn-sm" style={{ marginRight: 6 }} onClick={() => copy(i.code)}>Copy</button>
+                <button className="btn btn-d btn-sm" title="Revoke this PIN" onClick={() => onRevokePin(i)}>{IC.trash}</button>
+              </span>
+            </div>
+            <small style={{ color: "var(--mut)" }}>{i.label ? `For ${i.label} · ` : ""}Expires {fmtDate(i.expires_at)}</small>
+          </div>
+        ))}
+        {live.length === 0 && <small style={{ color: "var(--mut)" }}>No active PINs.</small>}
+        {used.length > 0 && (
+          <div style={{ marginTop: 14, borderTop: "1px solid var(--line)", paddingTop: 10 }}>
+            <small style={{ color: "var(--mut)" }}><b>Used:</b> {used.slice(0, 8).map((i) => `${i.code}${i.label ? ` (${i.label})` : ""}`).join(", ")}</small>
+          </div>
+        )}
+      </div>
+      {edit && <ContractorForm contractor={edit} maxDiscount={maxD} onClose={() => setEdit(null)} onSave={onSave} />}
+      {adding && <ContractorForm contractor={null} maxDiscount={maxD} onClose={() => setAdding(false)} onCreate={onCreate} />}
+    </div>
   );
 }
 
@@ -1779,11 +1937,10 @@ function ResetPassword({ token, onDone }) {
   const [err, setErr] = useState(""); const [busy, setBusy] = useState(false);
   useEffect(() => {
     (async () => {
-      if (!hasSupabase) return setStage("invalid");
       try {
-        const { data } = await supabase.from("portal_users").select("id,email,reset_expires").eq("reset_token", token).maybeSingle();
-        if (!data || !data.reset_expires || new Date(data.reset_expires) < new Date()) return setStage("invalid");
-        setUser(data); setStage("ready");
+        const { valid, email } = await api("checkReset", { resetToken: token });
+        if (!valid) return setStage("invalid");
+        setUser({ email }); setStage("ready");
       } catch { setStage("invalid"); }
     })();
   }, [token]);
@@ -1792,10 +1949,9 @@ function ResetPassword({ token, onDone }) {
     if (pw.length < 4) return setErr("Password must be at least 4 characters.");
     if (pw !== pw2) return setErr("Passwords don't match.");
     setBusy(true);
-    const hash = await sha256(pw);
-    const { error } = await supabase.from("portal_users").update({ password_hash: hash, reset_token: null, reset_expires: null }).eq("id", user.id);
+    try { await api("resetPassword", { resetToken: token, password: pw }); }
+    catch (ex) { setBusy(false); return setErr(ex.message); }
     setBusy(false);
-    if (error) return setErr(error.message);
     setStage("done");
   };
   return (
@@ -1824,10 +1980,10 @@ function ForcePasswordChange({ user, onDone }) {
     if (pw.length < 4) return setErr("Password must be at least 4 characters.");
     if (pw !== pw2) return setErr("Passwords don't match.");
     setBusy(true);
-    const { error } = await supabase.from("portal_users").update({ password_hash: await sha256(pw), reset_token: null, reset_expires: null }).eq("id", user.id);
+    let updated;
+    try { updated = (await api("changePassword", { password: pw })).user; }
+    catch (ex) { setBusy(false); return setErr(ex.message); }
     setBusy(false);
-    if (error) return setErr(error.message);
-    const updated = { ...user, reset_token: null };
     localStorage.setItem("ftp_session", JSON.stringify(updated));
     onDone(updated);
   };
@@ -1850,16 +2006,18 @@ function ForcePasswordChange({ user, onDone }) {
 export default function App() {
   const [session, setSession] = useState(() => { try { return JSON.parse(localStorage.getItem("ftp_session")) || null; } catch { return null; } });
   const [guest, setGuest] = useState(false);
-  const [mustChangePw, setMustChangePw] = useState(() => { try { return JSON.parse(localStorage.getItem("ftp_session"))?.reset_token === "__MUSTCHANGE__"; } catch { return false; } });
+  const [mustChangePw, setMustChangePw] = useState(() => { try { return !!JSON.parse(localStorage.getItem("ftp_session"))?.must_change_pw; } catch { return false; } });
   const [resetToken, setResetToken] = useState(() => { try { return new URLSearchParams(window.location.search).get("reset"); } catch { return null; } });
-  const [page, setPage] = useState(() => { try { const s = JSON.parse(localStorage.getItem("ftp_session")); return s ? (s.role === "admin" ? "dashboard" : "shop") : "home"; } catch { return "home"; } });
+  const [page, setPage] = useState(() => { try { const s = JSON.parse(localStorage.getItem("ftp_session")); return s ? (s.role === "admin" || s.role === "distributor" ? "dashboard" : "shop") : "home"; } catch { return "home"; } });
   const [products, setProducts] = useState(SEED_PRODUCTS);
   const [requests, setRequests] = useState([]);
   const [items, setItems] = useState([]);
   const [msgs, setMsgs] = useState([]);
   const [parts, setParts] = useState([]);
   const [contractors, setContractors] = useState([]);
-  const [staff, setStaff] = useState([]); // admin/staff logins (managed on the Team page)
+  const [staff, setStaff] = useState([]); // admin + distributor logins (managed on the Team page)
+  const [invites, setInvites] = useState([]); // distributor's customer sign-up PINs
+  const [actingId, setActingId] = useState(() => { try { return localStorage.getItem("ftp_acting") || ""; } catch { return ""; } }); // distributor: which customer they're working for
   const [menuOpen, setMenuOpen] = useState(false); // mobile slide-in nav drawer
   const [reqFilter, setReqFilter] = useState("all"); // seeds the Requests list filter (set by dashboard tiles)
   const [cart, setCart] = useState([]);
@@ -1870,18 +2028,18 @@ export default function App() {
   const [toast, setToast] = useState("");
   // Health check: detect a database outage and show a friendly maintenance banner (auto-clears when back).
   useEffect(() => {
-    if (!hasSupabase) return;
     let alive = true;
     const check = async () => {
       try {
-        const { error } = await supabase.from("portal_products").select("sku").limit(1);
-        if (alive) setDbDown(!!error);
+        const { ok } = await api("health");
+        if (alive) setDbDown(!ok);
       } catch { if (alive) setDbDown(true); }
     };
     check();
     const iv = setInterval(check, 15000);
     return () => { alive = false; clearInterval(iv); };
   }, []);
+  const logoutRef = useRef(null); // lets loadAll sign out when the session token expires
   // camera / AI photo identify
   const cameraRef = useRef(null);
   const [camBusy, setCamBusy] = useState(false);
@@ -1894,42 +2052,35 @@ export default function App() {
 
   const role = session?.role || "contractor";
   const isAdmin = role === "admin";
+  const isDist = role === "distributor";           // distributor login — scoped to their own customers
   const contractorsById = useMemo(() => Object.fromEntries(contractors.map((c) => [c.id, c])), [contractors]);
+  // A distributor shops/orders "for" one of their customers — pricing follows that customer.
+  const actingCustomer = isDist ? contractors.find((c) => c.id === actingId) || null : null;
+  const priceFor = isDist ? actingCustomer : isAdmin ? null : session;
   // Per-contractor discount: list prices are stored everywhere; this applies their % when shown/added.
-  const discPct = (!isAdmin && Number(session?.discount_pct)) || 0;
+  const discPct = Number(priceFor?.discount_pct) || 0;
   const applyDisc = (p) => Math.round(p * (1 - discPct / 100) * 100) / 100;
 
+  // One call: the server decides what this login is allowed to see (admin -> everyone,
+  // distributor -> their own customers, contractor -> themselves) and returns only that.
   const loadAll = useCallback(async (sess) => {
-    if (!hasSupabase || !sess) return;
+    if (!sess) return;
     try {
-      const { data: prods, error: pe } = await supabase.from("portal_products").select("*").eq("active", true).order("category").order("sku");
-      if (pe) throw pe;
-      if (prods?.length) setProducts(prods);
-      let reqQ = supabase.from("portal_requests").select("*").order("created_at", { ascending: false });
-      if (sess.role !== "admin") reqQ = reqQ.eq("contractor_id", sess.id);
-      const { data: reqs, error: re } = await reqQ;
-      if (re) throw re;
-      setRequests(reqs || []);
-      const ids = (reqs || []).map((r) => r.id);
-      if (ids.length) {
-        const [{ data: its }, { data: mss }] = await Promise.all([
-          supabase.from("portal_request_items").select("*").in("request_id", ids),
-          supabase.from("portal_messages").select("*").in("request_id", ids).order("created_at"),
-        ]);
-        setItems(its || []); setMsgs(mss || []);
-      } else { setItems([]); setMsgs([]); }
-      if (sess.role === "admin") {
-        const { data: cons } = await supabase.from("portal_users").select("*").eq("role", "contractor").order("company");
-        setContractors(cons || []);
-        const { data: adm } = await supabase.from("portal_users").select("*").eq("role", "admin").order("name");
-        setStaff(adm || []);
-      } else {
-        const { data: ps } = await supabase.from("portal_custom_flashings").select("*").eq("contractor_id", sess.id).order("created_at", { ascending: false });
-        setParts(ps || []);
-      }
+      const d = await api("loadAll");
+      if (d.products?.length) setProducts(d.products);
+      setRequests(d.requests || []);
+      setItems(d.items || []);
+      setMsgs(d.messages || []);
+      setContractors(d.contractors || []);
+      setStaff(d.staff || []);
+      setParts(d.parts || []);
+      setInvites(d.invites || []);
+      // Keep the cached session fresh (discount %, role, cap changes made by an admin).
+      if (d.user) { try { localStorage.setItem("ftp_session", JSON.stringify(d.user)); } catch (e) {} }
       setDbError(false);
     } catch (e) {
       console.error(e);
+      if (e.status === 401) { logoutRef.current?.(); return; } // token expired / revoked
       if (String(e.message || "").includes("does not exist")) setDbError(true);
     }
   }, []);
@@ -1967,7 +2118,7 @@ export default function App() {
     setCamBusy(true);
     try {
       const imageBase64 = await fileToBase64(file);
-      const r = await fetch("/api/identify-flashing", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ imageBase64, mediaType: "image/jpeg" }) });
+      const r = await fetch("/api/identify-flashing", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ imageBase64, mediaType: "image/jpeg", token: getToken() }) });
       const data = await r.json();
       if (data.skipped) { setPage("builder"); flash("AI photo identify isn't set up yet — pick the type manually."); }
       else if (data.ok && data.typeId) { setCamResult(data); setCamNonce((n) => n + 1); setPage("builder"); }
@@ -1981,10 +2132,13 @@ export default function App() {
 
   const login = (u) => {
     localStorage.setItem("ftp_session", JSON.stringify(u)); setSession(u); setGuest(false);
-    if (u.reset_token === "__MUSTCHANGE__") { setMustChangePw(true); return; } // force new password before entering
-    setPage(u.role === "admin" ? "dashboard" : "shop");
+    if (u.must_change_pw) { setMustChangePw(true); return; } // force new password before entering
+    setPage(u.role === "admin" || u.role === "distributor" ? "dashboard" : "shop");
   };
-  const logout = () => { localStorage.removeItem("ftp_session"); setSession(null); setMustChangePw(false); setCart([]); setSelReq(null); setPage("home"); };
+  const logout = () => { localStorage.removeItem("ftp_session"); localStorage.removeItem("ftp_acting"); setToken(null); setSession(null); setMustChangePw(false); setCart([]); setSelReq(null); setActingId(""); setPage("home"); };
+  logoutRef.current = logout;
+  // distributor: switch which customer they're shopping / ordering for (drives pricing)
+  const setActing = (id) => { setActingId(id); setCart([]); try { id ? localStorage.setItem("ftp_acting", id) : localStorage.removeItem("ftp_acting"); } catch (e) {} };
   // Dashboard tile → jump to the Requests list pre-filtered (new / pending / overdue / open).
   const goRequests = (status) => { setReqFilter(status); setSelReq(null); setPage("requests"); setMenuOpen(false); };
 
@@ -2008,26 +2162,23 @@ export default function App() {
     flash(`Added ${pieces} ${isSheet ? "pcs" : "ea"} ${cf.part_number}`);
   };
   const savePart = async (cf) => {
-    if (!hasSupabase) return;
-    const row = { contractor_id: session.id, part_number: cf.part_number, name: cf.name, flashing_type: cf.flashing_type, material_code: cf.material_code, params: cf.params, girth: cf.girth, bends: cf.bends, piece_length_ft: cf.piece_length_ft, price_per_piece: cf.price_per_piece };
-    const { data, error } = await supabase.from("portal_custom_flashings").insert(row).select().single();
-    if (!error && data) setParts((p) => [data, ...p]);
+    try { const { part } = await api("savePart", { part: cf }); if (part) setParts((p) => [part, ...p]); }
+    catch (e) { alert("Could not save that part: " + e.message); }
   };
   const delPart = async (p) => {
-    await supabase.from("portal_custom_flashings").delete().eq("id", p.id);
-    setParts((ps) => ps.filter((x) => x.id !== p.id));
+    try { await api("delPart", { id: p.id }); setParts((ps) => ps.filter((x) => x.id !== p.id)); }
+    catch (e) { alert("Could not delete that part: " + e.message); }
   };
 
   // ── submit request ──
   const submitRequest = async (meta, subtotal) => {
+    // A distributor submits on behalf of one of their customers; the request still
+    // belongs to the customer, with placed_by recording who actually sent it.
+    const buyer = isDist ? actingCustomer : session;
+    if (isDist && !buyer) { alert("Pick which customer this request is for first."); return; }
     setBusy(true);
     try {
-      const row = { contractor_id: session.id, req_type: meta.req_type, status: "new", job_name: meta.job_name || null, po_number: meta.po_number || null, needed_by: meta.needed_by || null, notes: meta.notes || null, subtotal };
-      const { data: req, error } = await supabase.from("portal_requests").insert(row).select().single();
-      if (error) throw error;
-      const lines = cart.map((i) => ({ request_id: req.id, item_kind: i.kind, sku: i.sku, description: i.description, unit: i.unit, qty: i.qty, unit_price: i.unit_price, line_total: i.line_total, detail: i.detail || null }));
-      const { error: e2 } = await supabase.from("portal_request_items").insert(lines);
-      if (e2) throw e2;
+      const { request: req } = await api("submitRequest", { meta, cart, subtotal, forCustomerId: isDist ? buyer.id : null });
       const emailItems = [...cart];
       setCart([]);
       await loadAll(session);
@@ -2035,12 +2186,13 @@ export default function App() {
       flash(`${meta.req_type === "quote" ? "Quote" : "Order"} request sent to Flash-Tech!`);
       // ── email notifications ──
       const lbl = meta.req_type === "quote" ? "Quote" : "Order";
-      const who = `${session.company || session.name}${session.name && session.company ? ` (${session.name})` : ""}`;
-      sendMail(NOTIFY_EMAIL, `New ${lbl} request — ${session.company || session.name}`,
-        emailShell(`New ${lbl} Request`, `<p><b>${who}</b> submitted a ${meta.req_type} request${meta.job_name ? ` for <b>${meta.job_name}</b>` : ""}.</p>${session.distributor ? `<p>Distributor: <b>${session.distributor}</b>${session.sales_rep ? ` · Rep: ${session.sales_rep}` : ""}</p>` : ""}${mailItems(emailItems)}<p>Estimated subtotal: <b>${fmt(subtotal)}</b></p>${mailBtn("Open in Portal", PORTAL_URL)}`),
-        session.email);
-      sendMail(session.email, `We received your ${meta.req_type} request`,
-        emailShell(`Thanks, ${session.name}!`, `<p>We've received your ${meta.req_type} request${meta.job_name ? ` for <b>${meta.job_name}</b>` : ""}. Our team will review it and get back to you shortly.</p>${mailItems(emailItems)}<p>Estimated subtotal: <b>${fmt(subtotal)}</b> — final pricing is confirmed by Flash-Tech.</p>${mailBtn("View Your Requests", PORTAL_URL)}`),
+      const who = `${buyer.company || buyer.name}${buyer.name && buyer.company ? ` (${buyer.name})` : ""}`;
+      const onBehalf = isDist ? `<p>Submitted by <b>${session.company || session.name}</b> (distributor) on the customer's behalf.</p>` : "";
+      sendMail(NOTIFY_EMAIL, `New ${lbl} request — ${buyer.company || buyer.name}`,
+        emailShell(`New ${lbl} Request`, `<p><b>${who}</b> submitted a ${meta.req_type} request${meta.job_name ? ` for <b>${meta.job_name}</b>` : ""}.</p>${onBehalf}${buyer.distributor ? `<p>Distributor: <b>${buyer.distributor}</b>${buyer.sales_rep ? ` · Rep: ${buyer.sales_rep}` : ""}</p>` : ""}${mailItems(emailItems)}<p>Estimated subtotal: <b>${fmt(subtotal)}</b></p>${mailBtn("Open in Portal", PORTAL_URL)}`),
+        buyer.email);
+      sendMail(buyer.email, `We received your ${meta.req_type} request`,
+        emailShell(`Thanks, ${buyer.name}!`, `<p>We've received your ${meta.req_type} request${meta.job_name ? ` for <b>${meta.job_name}</b>` : ""}${isDist ? `, submitted by <b>${session.company || session.name}</b>` : ""}. Our team will review it and get back to you shortly.</p>${mailItems(emailItems)}<p>Estimated subtotal: <b>${fmt(subtotal)}</b> — final pricing is confirmed by Flash-Tech.</p>${mailBtn("View Your Requests", PORTAL_URL)}`),
         NOTIFY_EMAIL);
     } catch (e) { alert("Could not submit request: " + e.message); }
     setBusy(false);
@@ -2048,9 +2200,10 @@ export default function App() {
 
   // ── messaging & admin ops ──
   const sendMsg = async (req, body) => {
-    const row = { request_id: req.id, sender_role: role, sender_name: isAdmin ? "Flash-Tech" : session.name, body };
-    const { data, error } = await supabase.from("portal_messages").insert(row).select().single();
-    if (!error && data) {
+    let data;
+    try { data = (await api("sendMsg", { reqId: req.id, body })).message; }
+    catch (e) { alert("Could not send that message: " + e.message); return; }
+    if (data) {
       setMsgs((m) => [...m, data]);
       if (isAdmin && (req.status === "new" || req.status === "in_review")) setStatus(req, "responded");
       const c = contractorsById[req.contractor_id];
@@ -2059,19 +2212,21 @@ export default function App() {
           emailShell("You have a new message", `<p>Flash-Tech responded on your request${req.job_name ? ` for <b>${req.job_name}</b>` : ""}:</p><blockquote style="border-left:3px solid #0DD714;margin:10px 0;padding:6px 14px;color:#333">${body}</blockquote>${mailBtn("View & Reply", PORTAL_URL)}`),
           NOTIFY_EMAIL);
       } else if (!isAdmin) {
-        sendMail(NOTIFY_EMAIL, `New message on ${req.req_type} request — ${session.company || session.name}`,
-          emailShell("New customer message", `<p><b>${session.company || session.name}</b> messaged on request${req.job_name ? ` <b>${req.job_name}</b>` : ` #${req.id.slice(0, 8)}`}:</p><blockquote style="border-left:3px solid #0DD714;margin:10px 0;padding:6px 14px;color:#333">${body}</blockquote>${mailBtn("Open in Portal", PORTAL_URL)}`),
+        sendMail(NOTIFY_EMAIL, `New message on ${req.req_type} request — ${session.company || session.name}${isDist ? " (distributor)" : ""}`,
+          emailShell("New customer message", `<p><b>${session.company || session.name}</b>${isDist ? " (distributor)" : ""} messaged on request${req.job_name ? ` <b>${req.job_name}</b>` : ` #${req.id.slice(0, 8)}`}:</p><blockquote style="border-left:3px solid #0DD714;margin:10px 0;padding:6px 14px;color:#333">${body}</blockquote>${mailBtn("Open in Portal", PORTAL_URL)}`),
           session.email);
       }
     }
   };
   const setStatus = async (req, status) => {
-    await supabase.from("portal_requests").update({ status, updated_at: new Date().toISOString() }).eq("id", req.id);
+    try { await api("setStatus", { reqId: req.id, status }); }
+    catch (e) { alert("Could not update the status: " + e.message); return; }
     setRequests((rs) => rs.map((r) => (r.id === req.id ? { ...r, status } : r)));
   };
   const setQuoteTotal = async (req, total) => {
     if (!(total >= 0)) return;
-    await supabase.from("portal_requests").update({ admin_quote_total: total, updated_at: new Date().toISOString() }).eq("id", req.id);
+    try { await api("setQuoteTotal", { reqId: req.id, total }); }
+    catch (e) { alert("Could not save the quoted total: " + e.message); return; }
     setRequests((rs) => rs.map((r) => (r.id === req.id ? { ...r, admin_quote_total: total } : r)));
     flash("Quoted total saved.");
     const c = contractorsById[req.contractor_id];
@@ -2082,45 +2237,10 @@ export default function App() {
   // admin: edit the quote line-by-line (change prices/qty, add/remove items, add custom
   // lines), persist the changes, set the quoted total, and email the customer back.
   const saveQuote = async (req, editRows) => {
-    const orig = items.filter((i) => i.request_id === req.id);
-    // normalize + recompute line totals
-    const rows = editRows.map((r) => {
-      const qty = Math.max(0, parseFloat(r.qty) || 0);
-      const unit_price = Math.max(0, parseFloat(r.unit_price) || 0);
-      return { ...r, qty, unit_price, line_total: Math.round(qty * unit_price * 100) / 100 };
-    });
-    const total = Math.round(rows.reduce((s, r) => s + r.line_total, 0) * 100) / 100;
-    try {
-      // delete rows the admin removed
-      const keepIds = rows.filter((r) => r.id).map((r) => r.id);
-      const toDelete = orig.filter((o) => !keepIds.includes(o.id)).map((o) => o.id);
-      if (toDelete.length) {
-        const { error } = await supabase.from("portal_request_items").delete().in("id", toDelete);
-        if (error) throw error;
-      }
-      // update existing rows
-      for (const r of rows.filter((r) => r.id)) {
-        const { error } = await supabase.from("portal_request_items")
-          .update({ description: r.description, qty: r.qty, unit_price: r.unit_price, line_total: r.line_total })
-          .eq("id", r.id);
-        if (error) throw error;
-      }
-      // insert new custom lines the admin added
-      const inserts = rows.filter((r) => !r.id).map((r) => ({
-        request_id: req.id, item_kind: r.item_kind || "custom", sku: r.sku || null,
-        description: r.description, unit: r.unit || "ea", qty: r.qty, unit_price: r.unit_price,
-        line_total: r.line_total, detail: r.detail || null,
-      }));
-      if (inserts.length) {
-        const { error } = await supabase.from("portal_request_items").insert(inserts);
-        if (error) throw error;
-      }
-      // update the request: quoted total + mark responded
-      const { error } = await supabase.from("portal_requests")
-        .update({ admin_quote_total: total, status: "responded", updated_at: new Date().toISOString() })
-        .eq("id", req.id);
-      if (error) throw error;
-    } catch (e) { alert("Could not save the quote: " + e.message); return false; }
+    // The server re-computes the line totals and the quoted total from these rows.
+    let total;
+    try { total = (await api("saveQuote", { reqId: req.id, rows: editRows })).total; }
+    catch (e) { alert("Could not save the quote: " + e.message); return false; }
     await loadAll(session);
     flash("Quote saved & sent to the customer.");
     const c = contractorsById[req.contractor_id];
@@ -2129,25 +2249,49 @@ export default function App() {
       NOTIFY_EMAIL);
     return true;
   };
+  // ── quote → order conversion ──
+  // Either side can do it: the admin flips it from the request panel, or the
+  // contractor accepts their quote (optionally attaching a PO number). Both post
+  // a message to the thread so there's a record of who converted it and when.
+  const convertToOrder = async (req, poNumber) => {
+    if (req.req_type === "order") return false;
+    const po = (poNumber || "").trim();
+    let patch;
+    try { patch = (await api("convertToOrder", { reqId: req.id, po })).patch; }
+    catch (e) { alert("Could not convert this to an order: " + e.message); return false; }
+    setRequests((rs) => rs.map((r) => (r.id === req.id ? { ...r, ...patch } : r)));
+    flash("Converted to an order.");
+    await sendMsg({ ...req, ...patch }, isAdmin
+      ? "This quote has been converted to an order — we'll start processing it."
+      : `Quote accepted — please convert this to an order.${po ? ` PO #${po}` : ""}`);
+    return true;
+  };
+  // admin: put an order back to a quote (blocked once it's gone to QuickBooks)
+  const revertToQuote = async (req) => {
+    if (req.req_type !== "order") return;
+    if ((req.qb_status || "none") !== "none") { alert("This order is already queued for / pushed to QuickBooks. Remove it from the QuickBooks queue first."); return; }
+    if (!window.confirm("Change this order back to a quote?")) return;
+    let patch;
+    try { patch = (await api("revertToQuote", { reqId: req.id })).patch; }
+    catch (e) { alert("Could not change it back: " + e.message); return; }
+    setRequests((rs) => rs.map((r) => (r.id === req.id ? { ...r, ...patch } : r)));
+    flash("Changed back to a quote.");
+  };
   // admin: queue / unqueue an order for the QuickBooks Web Connector to pick up.
   // Nothing is sent to QuickBooks here — this only flags the order as ready. The
   // Web Connector pulls "queued" orders on its schedule and flips them to pushed.
   const setQbQueue = async (req, queued) => {
-    const patch = queued ? { qb_status: "queued", qb_error: null } : { qb_status: "none" };
-    const { error } = await supabase.from("portal_requests").update(patch).eq("id", req.id);
-    if (error) { alert("Could not update QuickBooks status: " + error.message); return; }
+    let patch;
+    try { patch = (await api("setQbQueue", { reqId: req.id, queued })).patch; }
+    catch (e) { alert("Could not update QuickBooks status: " + e.message); return; }
     setRequests((rs) => rs.map((r) => (r.id === req.id ? { ...r, ...patch } : r)));
     flash(queued ? "Order queued for QuickBooks." : "Removed from the QuickBooks queue.");
   };
   // admin: permanently delete a request (and its line items + messages)
   const deleteRequest = async (req) => {
     if (!window.confirm(`Delete this ${req.req_type} request${req.job_name ? ` for "${req.job_name}"` : ` #${req.id.slice(0, 8)}`}? This can't be undone.`)) return;
-    try {
-      await supabase.from("portal_messages").delete().eq("request_id", req.id);
-      await supabase.from("portal_request_items").delete().eq("request_id", req.id);
-      const { error } = await supabase.from("portal_requests").delete().eq("id", req.id);
-      if (error) throw error;
-    } catch (e) { alert("Could not delete: " + e.message); return; }
+    try { await api("deleteRequest", { reqId: req.id }); }
+    catch (e) { alert("Could not delete: " + e.message); return; }
     setRequests((rs) => rs.filter((r) => r.id !== req.id));
     setItems((it) => it.filter((i) => i.request_id !== req.id));
     setMsgs((m) => m.filter((x) => x.request_id !== req.id));
@@ -2155,64 +2299,75 @@ export default function App() {
     flash("Request deleted.");
   };
 
-  // ── admin: manage contractor accounts ──
+  // ── distributor: customer sign-up PINs (generated server-side) ──
+  const genPin = async (label) => {
+    let invite;
+    try { invite = (await api("genPin", { label })).invite; }
+    catch (e) { alert(String(e.message).includes("does not exist") || String(e.message).includes("schema cache") ? "Sign-up PINs need the database update — run DISTRIBUTOR-SETUP.sql in Supabase." : "Could not generate a PIN: " + e.message); return; }
+    setInvites((v) => [invite, ...v]);
+    flash(`PIN ${invite.code} created — give it to your customer.`);
+  };
+  const revokePin = async (inv) => {
+    if (!window.confirm(`Revoke PIN ${inv.code}? Your customer won't be able to use it.`)) return;
+    try { await api("revokePin", { id: inv.id }); }
+    catch (e) { alert("Could not revoke that PIN: " + e.message); return; }
+    setInvites((v) => v.filter((x) => x.id !== inv.id));
+    flash("PIN revoked.");
+  };
+
+  // ── admin / distributor: manage contractor accounts ──
+  // The server forces role="contractor", links a distributor's new customers to
+  // them, and caps any discount at that distributor's limit.
   const createContractor = async (fields, password) => {
-    const row = { ...fields, password_hash: await sha256(password), role: "contractor" };
-    const { error } = await supabase.from("portal_users").insert(row);
-    if (error) { alert(error.code === "23505" ? "That login/email is already in use." : "Could not add contractor: " + error.message); return false; }
+    try { await api("createContractor", { fields, password }); }
+    catch (e) { alert("Could not add contractor: " + e.message); return false; }
     await loadAll(session);
     flash("Contractor account added.");
     return true;
   };
   const saveContractor = async (id, fields, newPassword) => {
-    const patch = { ...fields };
-    if (newPassword) patch.password_hash = await sha256(newPassword);
-    const { error } = await supabase.from("portal_users").update(patch).eq("id", id);
-    if (error) { alert(error.code === "23505" ? "That login/email is already taken." : "Could not save: " + error.message); return false; }
+    try { await api("saveContractor", { id, fields, newPassword: newPassword || null }); }
+    catch (e) { alert("Could not save: " + e.message); return false; }
     await loadAll(session);
     flash(newPassword ? "Customer updated & password reset." : "Customer updated.");
     return true;
   };
   const deleteContractor = async (id) => {
-    const { error } = await supabase.from("portal_users").delete().eq("id", id);
-    if (error) { alert("Could not delete: " + error.message); return; }
+    try { await api("deleteContractor", { id }); }
+    catch (e) { alert("Could not delete: " + e.message); return; }
     setContractors((cs) => cs.filter((c) => c.id !== id));
     flash("Customer account deleted.");
   };
-  // Email a contractor their login: set a fresh temporary password + force a change on first sign-in.
+  // Email a contractor their login: the server sets a fresh temporary password and
+  // flags a forced change at next sign-in, then we email it to them.
   const notifyContractor = async (c) => {
     if (!c.email) { alert("This contractor has no email on file."); return; }
     if (!window.confirm(`Send ${c.company || c.name} their login details?\n\nThis sets a NEW temporary password and emails it to ${c.email}. They'll be asked to change it when they sign in.`)) return;
-    const tempPw = Math.random().toString(36).slice(2, 8);
-    const { error } = await supabase.from("portal_users").update({ password_hash: await sha256(tempPw), reset_token: "__MUSTCHANGE__", reset_expires: null }).eq("id", c.id);
-    if (error) { alert("Could not update the account: " + error.message); return; }
+    let tempPw;
+    try { tempPw = (await api("resetCustomerPassword", { id: c.id })).tempPw; }
+    catch (e) { alert("Could not update the account: " + e.message); return; }
     sendMail(c.email, "Welcome to the Flash-Tech Contractor Portal — your login", welcomeEmailHtml(c.name, c.email, tempPw), NOTIFY_EMAIL);
     flash(`Welcome email sent to ${c.email}.`);
   };
 
-  // ── admin: manage staff/admin logins (Team page) ──
+  // ── admin: manage staff / distributor logins (Team page) ──
   const createUser = async (fields, password) => {
-    const row = { ...fields, password_hash: await sha256(password), role: "admin" };
-    const { error } = await supabase.from("portal_users").insert(row);
-    if (error) { alert(error.code === "23505" ? "That login/email is already in use." : "Could not add user: " + error.message); return false; }
+    try { await api("createUser", { fields, password }); }
+    catch (e) { alert("Could not add user: " + e.message); return false; }
     await loadAll(session);
-    flash("Team member added.");
+    flash(fields.role === "distributor" ? "Distributor login added." : "Team member added.");
     return true;
   };
   const saveUser = async (id, fields, newPassword) => {
-    const patch = { ...fields };
-    if (newPassword) patch.password_hash = await sha256(newPassword);
-    const { error } = await supabase.from("portal_users").update(patch).eq("id", id);
-    if (error) { alert(error.code === "23505" ? "That login/email is already taken." : "Could not save: " + error.message); return false; }
+    try { await api("saveUser", { id, fields, newPassword: newPassword || null }); }
+    catch (e) { alert("Could not save: " + e.message); return false; }
     await loadAll(session);
     flash(newPassword ? "Team member updated & password reset." : "Team member updated.");
     return true;
   };
   const deleteUser = async (id) => {
-    if (id === session.id) { alert("You can't delete the account you're signed in with."); return; }
-    if (staff.length <= 1) { alert("You can't delete the last admin account."); return; }
-    const { error } = await supabase.from("portal_users").delete().eq("id", id);
-    if (error) { alert("Could not delete: " + error.message); return; }
+    try { await api("deleteUser", { id }); }
+    catch (e) { alert("Could not delete: " + e.message); return; }
     setStaff((s) => s.filter((u) => u.id !== id));
     flash("Team member deleted.");
   };
@@ -2239,7 +2394,9 @@ export default function App() {
       if (!thread.length) return false;
       const last = thread[thread.length - 1].created_at;
       return !seen[r.id] || new Date(last) > new Date(seen[r.id]);
-    }).map((r) => ({ key: r.id, go: r, text: `Flash-Tech replied on ${r.job_name ? `"${r.job_name}"` : `#${r.id.slice(0, 8)}`}`, sub: ageLabel(msgs.filter((m) => m.request_id === r.id).slice(-1)[0]?.created_at) }));
+    }).map((r) => ({ key: r.id, go: r,
+      text: `Flash-Tech replied on ${r.job_name ? `"${r.job_name}"` : `#${r.id.slice(0, 8)}`}${isDist ? ` — ${contractorsById[r.contractor_id]?.company || "customer"}` : ""}`,
+      sub: ageLabel(msgs.filter((m) => m.request_id === r.id).slice(-1)[0]?.created_at) }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requests, msgs, session, isAdmin, contractorsById]);
 
@@ -2271,17 +2428,20 @@ export default function App() {
     );
   }
   if (!session) return (<><style>{CSS}</style>{maintBanner}<LoginScreen onLogin={login} onGuest={() => setGuest(true)} dbError={dbError} /></>);
-  if (mustChangePw) return (<><style>{CSS}</style>{maintBanner}<ForcePasswordChange user={session} onDone={(u) => { setSession(u); setMustChangePw(false); setPage(u.role === "admin" ? "dashboard" : "shop"); }} /></>);
+  if (mustChangePw) return (<><style>{CSS}</style>{maintBanner}<ForcePasswordChange user={session} onDone={(u) => { setSession(u); setMustChangePw(false); setPage(u.role === "admin" || u.role === "distributor" ? "dashboard" : "shop"); }} /></>);
 
   const nav = isAdmin
     ? [["dashboard", "Dashboard", IC.home], ["requests", "Requests", IC.list], ["customers", "Customers", IC.users], ["team", "Team", IC.shield], ["catalog", "Catalog", IC.box], ["builder", "Custom Builder", IC.wrench], ["downloads", "Downloads", IC.download]]
+    : isDist
+    ? [["dashboard", "Dashboard", IC.home], ["requests", "Customer Requests", IC.list], ["customers", "My Customers", IC.users], ["catalog", "Parts Catalog", IC.box], ["builder", "Custom Flashing", IC.wrench], ["downloads", "Downloads", IC.download], ["cart", "Cart / Send Request", IC.cart]]
     : [["shop", "Home", IC.home], ["catalog", "Parts Catalog", IC.box], ["builder", "Custom Flashing", IC.wrench], ["downloads", "Downloads", IC.download], ["cart", "Cart / Send Request", IC.cart], ["requests", "My Requests", IC.list], ["parts", "My Saved Parts", IC.bookmark]];
 
   const titles = {
     shop: ["Welcome to Flash-Tech", "Pick a category — or jump straight into a custom builder"],
-    dashboard: ["Dashboard", "Incoming quote & order requests at a glance"],
-    requests: [isAdmin ? "Quote & Order Requests" : "My Requests", isAdmin ? "Click a request to review and respond" : "Track your quotes and orders"],
-    customers: ["Customers", "Contractor accounts on the portal"],
+    dashboard: ["Dashboard", isDist ? "Your customers' quotes & orders at a glance" : "Incoming quote & order requests at a glance"],
+    requests: [isAdmin ? "Quote & Order Requests" : isDist ? "Customer Requests" : "My Requests",
+      isAdmin ? "Click a request to review and respond" : isDist ? "Quotes and orders from your customers" : "Track your quotes and orders"],
+    customers: [isDist ? "My Customers" : "Customers", isDist ? "Your accounts — discounts, logins and sign-up PINs" : "Contractor accounts on the portal"],
     team: ["Team", "Staff logins with admin access — add, edit, reset or remove"],
     downloads: ["Shop Drawings", "Download submittal PDFs for your Flash-Tech products"],
     catalog: [isAdmin ? "Parts Catalog" : "Parts Catalog", isAdmin ? "Full price list — search and filter by category" : "Drip edge, coping & accessories — add by linear foot or each"],
@@ -2308,7 +2468,19 @@ export default function App() {
               </button>
             ))}
           </nav>
-          {!isAdmin && (
+          {isDist && (
+            <div style={{ padding: "0 12px 10px" }}>
+              <label style={{ display: "block", fontSize: 11, textTransform: "uppercase", letterSpacing: ".05em", color: "#8b9299", fontWeight: 700, marginBottom: 5 }}>Working for</label>
+              <select value={actingId} onChange={(e) => setActing(e.target.value)} style={{ fontSize: 13, padding: "7px 8px" }}>
+                <option value="">— pick a customer —</option>
+                {contractors.map((c) => <option key={c.id} value={c.id}>{c.company || c.name}</option>)}
+              </select>
+              <div style={{ fontSize: 11, color: "#8b9299", marginTop: 5 }}>
+                {actingCustomer ? `Prices show ${actingCustomer.company || actingCustomer.name}'s${discPct > 0 ? ` ${discPct}%` : ""} pricing.` : "Pick a customer to price and send requests for them."}
+              </div>
+            </div>
+          )}
+          {!isAdmin && !isDist && (
             <div style={{ padding: "0 8px 8px" }}>
               <button className="btn btn-lime" style={{ width: "100%", justifyContent: "center" }} disabled={camBusy} onClick={() => cameraRef.current?.click()}>
                 {IC.camera}&nbsp;{camBusy ? "Identifying…" : "Snap to Identify"}
@@ -2329,21 +2501,23 @@ export default function App() {
           {toast && <div className="note">{toast}</div>}
           {dbError && <div className="banner">{IC.alert}<div><b>Database tables not found.</b> Run database-setup.sql in your Supabase SQL editor, then reload.</div></div>}
 
-          {page === "dashboard" && isAdmin && <AdminDashboard requests={requests} msgs={msgs} contractorsById={contractorsById} onOpen={openRequest} onNav={goRequests} />}
-          {page === "customers" && isAdmin && <AdminCustomers contractors={contractors} requests={requests} onSave={saveContractor} onDelete={deleteContractor} onCreate={createContractor} onNotify={notifyContractor} />}
+          {page === "dashboard" && (isAdmin || isDist) && <AdminDashboard requests={requests} msgs={msgs} contractorsById={contractorsById} onOpen={openRequest} onNav={goRequests} />}
+          {page === "customers" && isAdmin && <AdminCustomers contractors={contractors} requests={requests} onSave={saveContractor} onDelete={deleteContractor} onCreate={createContractor} onNotify={notifyContractor} distributors={staff.filter((u) => u.role === "distributor")} />}
+          {page === "customers" && isDist && <DistributorCustomers me={session} contractors={contractors} requests={requests} invites={invites} onSave={saveContractor} onCreate={createContractor} onNotify={notifyContractor} onGenPin={genPin} onRevokePin={revokePin} />}
           {page === "team" && isAdmin && <AdminUsers users={staff} meId={session.id} onCreate={createUser} onSave={saveUser} onDelete={deleteUser} />}
           {page === "downloads" && <DownloadsPage />}
-          {page === "shop" && !isAdmin && <ShopPage products={products} discPct={discPct} onPickCategory={openCategory} onBuilder={openBuilder} />}
+          {page === "shop" && !isAdmin && !isDist && <ShopPage products={products} discPct={discPct} onPickCategory={openCategory} onBuilder={openBuilder} />}
           {page === "catalog" && isAdmin && <CatalogPage products={products} readOnly />}
-          {page === "catalog" && !isAdmin && <CatalogPage products={products} onAdd={addProduct} disc={applyDisc} discPct={discPct} seedCat={catSeed.cat} seedNonce={catSeed.nonce} />}
+          {page === "catalog" && !isAdmin && <CatalogPage products={products} onAdd={isDist && !actingCustomer ? null : addProduct} readOnly={isDist && !actingCustomer} disc={applyDisc} discPct={discPct} seedCat={catSeed.cat} seedNonce={catSeed.nonce} />}
           {page === "builder" && isAdmin && <BuilderPage reference guest={false} onAddToCart={() => {}} onSavePart={() => {}} />}
-          {page === "builder" && !isAdmin && <BuilderPage guest={false} onAddToCart={addCustom} onSavePart={savePart} disc={applyDisc} discPct={discPct} detectInfo={camResult} detectNonce={camNonce} seedType={bSeed.type} seedNonce={bSeed.nonce} />}
-          {page === "cart" && !isAdmin && <CartPage cart={cart} onRemove={(k) => setCart((c) => c.filter((i) => i.key !== k))} onClear={() => setCart([])} onSubmit={submitRequest} busy={busy} user={session} />}
-          {page === "parts" && !isAdmin && <MyPartsPage parts={parts} onAdd={addCustom} onDel={delPart} disc={applyDisc} discPct={discPct} />}
+          {page === "builder" && !isAdmin && <BuilderPage guest={false} reference={isDist && !actingCustomer} onAddToCart={addCustom} onSavePart={isDist ? () => {} : savePart} disc={applyDisc} discPct={discPct} detectInfo={camResult} detectNonce={camNonce} seedType={bSeed.type} seedNonce={bSeed.nonce} />}
+          {page === "cart" && !isAdmin && <CartPage cart={cart} onRemove={(k) => setCart((c) => c.filter((i) => i.key !== k))} onClear={() => setCart([])} onSubmit={submitRequest} busy={busy} user={isDist ? actingCustomer : session} forCustomer={isDist ? actingCustomer : null} needsCustomer={isDist && !actingCustomer} />}
+          {page === "parts" && !isAdmin && !isDist && <MyPartsPage parts={parts} onAdd={addCustom} onDel={delPart} disc={applyDisc} discPct={discPct} />}
           {page === "requests" && (curReq ? (
             <RequestDetail req={curReq} items={items} msgs={msgs} role={role}
-              contractor={isAdmin ? contractorsById[curReq.contractor_id] : null} user={session}
-              onBack={() => setSelReq(null)} onSend={sendMsg} onStatus={setStatus} onQuoteTotal={setQuoteTotal} onDelete={isAdmin ? deleteRequest : null} onSaveQuote={isAdmin ? saveQuote : null} onQbQueue={isAdmin ? setQbQueue : null} />
+              contractor={isAdmin || isDist ? contractorsById[curReq.contractor_id] : null} user={session}
+              onBack={() => setSelReq(null)} onSend={sendMsg} onStatus={setStatus} onQuoteTotal={setQuoteTotal} onDelete={isAdmin ? deleteRequest : null} onSaveQuote={isAdmin ? saveQuote : null} onQbQueue={isAdmin ? setQbQueue : null}
+              onConvert={convertToOrder} onRevert={isAdmin ? revertToQuote : null} />
           ) : (
             <RequestList requests={requests} msgs={msgs} role={role} contractorsById={contractorsById} onOpen={openRequest} onStatus={setStatus} onDelete={deleteRequest} initialStatus={reqFilter} />
           ))}

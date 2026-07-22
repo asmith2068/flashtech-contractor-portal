@@ -74,10 +74,37 @@ Open http://localhost:5173
    git push -u origin main
    ```
 2. [vercel.com](https://vercel.com) → **Add New Project** → import the repo
-3. Add the two environment variables (same values as in `.env.local`):
-   - `VITE_SUPABASE_URL`
-   - `VITE_SUPABASE_ANON_KEY`
+3. Add the environment variables (see **Security setup** below)
 4. **Deploy** → share the URL with your contractors
+
+---
+
+## Security setup (required)
+
+The browser never talks to the database. It calls `/api/portal`, a serverless
+function that verifies a signed session token and decides what each login is
+allowed to see: admins see everything, a **distributor** sees only the customers
+linked to them, and a contractor sees only their own account.
+
+Vercel environment variables:
+
+| Name | What it is |
+|---|---|
+| `SUPABASE_SERVICE_ROLE` | service_role key — Supabase → Settings → API. **Secret. Never put this in `VITE_*`.** |
+| `SESSION_SECRET` | any long random string, used to sign session tokens |
+| `SUPABASE_URL` | optional — defaults to the project URL in `api/portal.js` |
+| `RESEND_API_KEY` / `EMAIL_FROM` | email (already set) |
+| `ANTHROPIC_API_KEY` | photo identify (already set) |
+
+The old `VITE_SUPABASE_*` variables are no longer used and can be removed.
+
+SQL to run in the Supabase SQL editor, **in this order**:
+
+1. `DISTRIBUTOR-SETUP.sql` — adds distributor links, discount caps and sign-up PINs
+2. deploy, and confirm sign-in / requests / admin pages all work
+3. `LOCKDOWN.sql` — **last**: removes the "allow all" policies so the public key
+   can no longer read or write anything. The portal keeps working because the
+   server API uses the service-role key, which bypasses row level security.
 
 ---
 
