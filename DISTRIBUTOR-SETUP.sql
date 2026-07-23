@@ -4,6 +4,13 @@
 -- Safe to re-run: every statement is IF NOT EXISTS / idempotent.
 -- ─────────────────────────────────────────────────────────────
 
+-- 0. Allow the new "distributor" role. The original schema's CHECK constraints
+--    only permitted contractor/admin, which blocks distributor logins + messages.
+alter table portal_users   drop constraint if exists portal_users_role_check;
+alter table portal_users   add  constraint portal_users_role_check   check (role in ('contractor', 'admin', 'distributor'));
+alter table portal_messages drop constraint if exists portal_messages_sender_role_check;
+alter table portal_messages add  constraint portal_messages_sender_role_check check (sender_role in ('contractor', 'admin', 'distributor'));
+
 -- 1. Link a customer (contractor) to the distributor that owns them.
 --    NULL = house account, only Flash-Tech admins see it.
 alter table portal_users add column if not exists distributor_id uuid references portal_users(id) on delete set null;
