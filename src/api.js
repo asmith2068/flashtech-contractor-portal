@@ -6,11 +6,23 @@
 
 const TOKEN_KEY = "ftp_token";
 
-// `vite dev` has no /api routes, so local development talks to the deployed
-// serverless function (and therefore the live database — same as before).
-const BASE = (typeof window !== "undefined" && /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname))
-  ? "https://flashtech-contractor-portal.vercel.app"
-  : "";
+const PROD = "https://flashtech-contractor-portal.vercel.app";
+const isLocalhost = typeof window !== "undefined" && /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname);
+
+// Where the data API lives:
+//
+//   • .env.local has SUPABASE_SERVICE_ROLE + SESSION_SECRET → vite serves api/
+//     locally (see vite.config.js) and we call that. Dev is isolated, pointed at
+//     whichever database those credentials name.
+//
+//   • Otherwise there is no local server to call, so we fall back to the deployed
+//     function — which means LOCAL DEV IS READING AND WRITING PRODUCTION DATA.
+//     USING_PRODUCTION_DATA drives the warning banner in App.jsx. Set up a
+//     staging Supabase project (see README) to get out of this mode.
+const hasLocalApi = typeof __LOCAL_API__ !== "undefined" && __LOCAL_API__;
+
+export const USING_PRODUCTION_DATA = isLocalhost && !hasLocalApi;
+const BASE = USING_PRODUCTION_DATA ? PROD : "";
 
 export function getToken() { try { return localStorage.getItem(TOKEN_KEY) || null; } catch { return null; } }
 export function setToken(t) { try { t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ } }

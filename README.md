@@ -59,8 +59,8 @@ npm install
 npm run dev
 ```
 
-`.env.local` is already pointed at your existing Supabase project.
-Open http://localhost:5173
+Open http://localhost:5173 — see **Local development** below for which database
+you'll be talking to.
 
 ### STEP 3: Deploy to Vercel
 
@@ -76,6 +76,41 @@ Open http://localhost:5173
 2. [vercel.com](https://vercel.com) → **Add New Project** → import the repo
 3. Add the environment variables (see **Security setup** below)
 4. **Deploy** → share the URL with your contractors
+
+---
+
+## Local development
+
+`npm run dev` runs the `api/` serverless functions locally (a small dev-only
+plugin in `vite.config.js` does this), so the app is self-contained. Which
+database it uses depends on `.env.local`:
+
+**Without `SUPABASE_SERVICE_ROLE` + `SESSION_SECRET`** there's nothing for the
+local API to connect to, so the app falls back to calling the **deployed**
+function — meaning **localhost is reading and writing live customer data.** A red
+warning bar across the bottom of the screen tells you when you're in this mode.
+
+**With them set**, localhost talks to its own API against whatever database those
+credentials name, and the warning bar disappears.
+
+### Setting up an isolated staging database (~15 min, free)
+
+Do this once and local development stops touching production:
+
+1. [supabase.com](https://supabase.com) → **New Project** → name it
+   `flashtech-portal-staging`. Free tier is fine.
+2. **SQL Editor** → run `database-setup.sql`, then `DISTRIBUTOR-SETUP.sql`,
+   then `LOCKDOWN.sql` — in that order.
+3. **Settings → API** → copy the Project URL and the `service_role` key.
+4. `cp .env.example .env.local` and fill in `SUPABASE_URL`,
+   `SUPABASE_SERVICE_ROLE`, and any long random string for `SESSION_SECRET`.
+5. `npm run dev` — the red bar is gone. You're on staging.
+
+Sign in with the demo logins from `database-setup.sql` and break whatever you
+like; nothing here reaches real customers.
+
+> Only ever put **staging** credentials in `.env.local`. It's gitignored, but the
+> point of the file is to be the thing that *isn't* production.
 
 ---
 

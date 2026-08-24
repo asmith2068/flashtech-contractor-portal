@@ -27,15 +27,22 @@ Deploy is automatic: push to `main` on `asmith2068/flashtech-contractor-portal`
 
 **Never push to `main` without being asked.** A push is a production deploy.
 
-### ⚠️ Local dev writes to the PRODUCTION database
+### Which database is local dev using?
 
-`vite dev` doesn't serve `/api` routes, so `src/api.js` sets `BASE` to the live
-Vercel URL whenever the hostname is localhost. Every action you take on
-`localhost:5173` — creating users, submitting requests, changing statuses, queuing
-QuickBooks orders — hits the real serverless function and the real database.
+`vite.config.js` has a dev-only plugin that serves the `api/` functions locally, so
+`npm run dev` runs the real server code. Which database it hits depends on
+`.env.local`:
 
-Use obviously-fake data when testing locally, and never run destructive actions
-(`deleteRequest`, `deleteUser`, `deleteContractor`) against real records.
+| `.env.local` has… | Behaviour |
+|---|---|
+| `SUPABASE_SERVICE_ROLE` + `SESSION_SECRET` | Local API against that database. Isolated. |
+| neither | **Falls back to the deployed function — localhost is writing PRODUCTION data.** A red warning bar shows at the bottom of the screen. |
+
+`USING_PRODUCTION_DATA` is exported from `src/api.js` and drives that bar.
+
+**When the red bar is showing, do not create test records and never run
+`deleteRequest` / `deleteUser` / `deleteContractor`.** If you need to test
+destructively, set up the staging project first (README → "Local development").
 
 ---
 
@@ -104,6 +111,30 @@ Running it early breaks things; skipping it leaves the database open.
 queue on its own schedule. **Nothing in this repo calls a QuickBooks API, and nothing
 should start to.** Only orders push, never quotes. Once `qb_status !== "none"`, an
 order can't be reverted to a quote until it's pulled from the queue.
+
+**Submittals / shop drawings.** Three entry points, all sharing one renderer:
+
+| Entry point | Who | What it makes |
+|---|---|---|
+| My Saved Parts → "Shop Drawing" | contractor | one sheet |
+| Custom Builder → "Print Submittal Sheet" | admin (reference mode) | one sheet, no quote needed |
+| Request detail → "Submittal Package" | admin | cover sheet + one sheet per made part |
+
+The shared pieces are `shopSheet(part, info, label)` (one title-blocked page),
+`SHEET_CSS`, and `openPrintDoc(title, body)`. `printShopDrawing` wraps one sheet;
+`printSubmittal` emits a cover plus N sheets. **Add new output by composing
+`shopSheet`, never by writing a second copy of the markup.**
+
+Only made-to-order parts get a geometry page — `isMadePart(i)` is
+`item_kind === "custom"` with `detail.params` and `detail.flashing_type`. Catalog
+SKUs are standard stock and appear on the cover only; their static drawings live in
+`DRAWINGS` / `DATASHEETS` in `catalog.js` and are served from the Downloads tab.
+`itemToPart(i)` converts a request line into the shape `shopSheet` wants, deriving
+the bend count with `profileBends` since line items don't store one.
+
+These pages go to the shop floor and get metal cut from them. **A wrong dimension
+here is scrapped material** — if a value can't be derived reliably, leave it blank
+rather than guessing (that's why `itemToPart` catches and returns `null` bends).
 
 **Custom flashing pricing** lives in `src/catalog.js` — `MATERIALS` rates,
 `BEND_CHARGE`, `MIN_PIECE`, priced as $ per inch of girth per linear foot. Catalog

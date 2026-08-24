@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { api, getToken, setToken } from "./api.js";
+import { api, getToken, setToken, USING_PRODUCTION_DATA } from "./api.js";
 import Flashing3D from "./Flashing3D.jsx";
 import SinglePly3D from "./SinglePly3D.jsx";
 import {
@@ -141,8 +141,47 @@ function partPreviewSvg(part, height = 380) {
     return renderToStaticMarkup(<Flashing3D points={pts} lengthFt={part.piece_length_ft || 10} materialCode={part.material_code} height={height} letters={t.letters ? t.letters(part.params) : null} />);
   } catch (e) { console.error("drawing preview failed", e); return ""; }
 }
-function printShopDrawing(part, info) {
-  const esc = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+const escH = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+
+// Shared by the single shop drawing and the multi-page submittal package. Each
+// .sheet is one printed page; the print rules force a break between them.
+const SHEET_CSS = `body{font-family:Arial,Helvetica,sans-serif;color:#23282b;margin:30px;}
+.sheet{border:2px solid #23282b;}
+.sheet + .sheet{margin-top:26px}
+.hd{display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #23282b;padding:12px 16px}
+.hd h2{margin:0;font-size:20px;letter-spacing:.06em}
+.sub{font-size:11px;color:#6a7278}
+.tb{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:2px solid #23282b;font-size:12px}
+.tb>div{padding:7px 10px;border-right:1px solid #c9cdd0}.tb>div:last-child{border-right:none}
+.tb b{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#6a7278;margin-bottom:2px;font-weight:700}
+.stage{padding:18px;text-align:center;background:#fbfcfc}
+.stage svg{max-width:100%;height:auto;max-height:430px}
+.geom{padding:0 16px 14px}
+table{width:100%;border-collapse:collapse;font-size:12px;margin-top:10px}
+th{background:#2b2f31;color:#fff;text-align:left;padding:7px 8px;font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+td{padding:6px 8px;border-bottom:1px solid #e3e6e8}.r{text-align:right}
+.ft{display:flex;justify-content:space-between;gap:16px;border-top:2px solid #23282b;padding:10px 16px;font-size:11px;color:#6a7278}
+.sig{display:flex;gap:40px;margin-top:6px}.sig span{border-top:1px solid #23282b;padding-top:3px;min-width:170px;display:inline-block}
+.pill{display:inline-block;padding:1px 7px;border-radius:9px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+.pill-mk{background:#0aa810;color:#fff}.pill-cat{background:#e3e6e8;color:#4a5257}
+button{margin-bottom:16px;padding:9px 18px;background:#0aa810;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer}
+@media print{button{display:none}body{margin:12px}
+.sheet{page-break-after:always}.sheet:last-of-type{page-break-after:auto}.sheet + .sheet{margin-top:0}}`;
+
+// Open a generated document in a new tab, with a Print / Save-as-PDF button.
+function openPrintDoc(title, bodyHtml) {
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>${escH(title)}</title>
+<style>${SHEET_CSS}</style></head><body>
+<button onclick="window.print()">🖨 Print / Save as PDF</button>
+${bodyHtml}</body></html>`;
+  const w = window.open("", "_blank");
+  if (!w) { alert("Please allow pop-ups for this site to open the drawing."); return; }
+  w.document.write(html); w.document.close(); w.focus();
+}
+
+// The shop's build page for ONE part: title block, 3D view, and every dimension,
+// angle and stretch-out needed to brake it. `label` numbers it inside a package.
+function shopSheet(part, info, label = null) {
   const t = typeById(part.flashing_type);
   const isSheet = (t.kind || "sheet") === "sheet";
   const p = part.params || {};
@@ -158,60 +197,128 @@ function printShopDrawing(part, info) {
   } else {
     geomRows = (t.fields || []).map((f) => {
       const v = p[f.key];
-      const label = f.type === "choice" ? ((f.options.find((o) => o.value === v) || {}).label || v) : `${v}${String(f.label).includes("(°)") ? "°" : '"'}`;
-      return `<tr><td>${esc(f.label)}</td><td class="r" colspan="2">${esc(label)}</td></tr>`;
+      const label2 = f.type === "choice" ? ((f.options.find((o) => o.value === v) || {}).label || v) : `${v}${String(f.label).includes("(°)") ? "°" : '"'}`;
+      return `<tr><td>${escH(f.label)}</td><td class="r" colspan="2">${escH(label2)}</td></tr>`;
     }).join("");
     if (part.girth) geomRows += `<tr><td><b>Stretch-out</b></td><td class="r" colspan="2"><b>${part.girth}"</b>${part.bends ? ` · ${part.bends} bends` : ""}</td></tr>`;
   }
   if (isSheet && !t.pan && !t.outlet) geomRows += `<tr><td>Piece length</td><td class="r" colspan="2">${part.piece_length_ft || 10}'-0"</td></tr>`;
   const svg = partPreviewSvg(part);
   const today = fmtDate(new Date().toISOString());
-  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Shop Drawing — ${esc(info.partName || part.part_number)}</title>
-<style>body{font-family:Arial,Helvetica,sans-serif;color:#23282b;margin:30px;}
-.sheet{border:2px solid #23282b;}
-.hd{display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #23282b;padding:12px 16px}
-.hd h2{margin:0;font-size:20px;letter-spacing:.06em}
-.sub{font-size:11px;color:#6a7278}
-.tb{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:2px solid #23282b;font-size:12px}
-.tb>div{padding:7px 10px;border-right:1px solid #c9cdd0}.tb>div:last-child{border-right:none}
-.tb b{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#6a7278;margin-bottom:2px;font-weight:700}
-.stage{padding:18px;text-align:center;background:#fbfcfc}
-.stage svg{max-width:100%;height:auto;max-height:430px}
-.geom{padding:0 16px 14px}
-table{width:100%;border-collapse:collapse;font-size:12px;margin-top:10px}
-th{background:#2b2f31;color:#fff;text-align:left;padding:7px 8px;font-size:11px;text-transform:uppercase;letter-spacing:.04em}
-td{padding:6px 8px;border-bottom:1px solid #e3e6e8}.r{text-align:right}
-.ft{display:flex;justify-content:space-between;gap:16px;border-top:2px solid #23282b;padding:10px 16px;font-size:11px;color:#6a7278}
-.sig{display:flex;gap:40px;margin-top:6px}.sig span{border-top:1px solid #23282b;padding-top:3px;min-width:170px;display:inline-block}
-button{margin-bottom:16px;padding:9px 18px;background:#0aa810;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer}
-@media print{button{display:none}body{margin:12px}}</style></head><body>
-<button onclick="window.print()">🖨 Print / Save as PDF</button>
-<div class="sheet">
+  return `<div class="sheet">
 <div class="hd"><div><img src="${FT_LOGO}" alt="Flash-Tech Mfg, Inc." style="height:44px;display:block"><div class="sub">${FT_INFO.addr} · ${FT_INFO.phone}</div></div>
-<div style="text-align:right"><h2>SHOP DRAWING</h2><div class="sub">Part # ${esc(part.part_number)} · ${today}</div></div></div>
+<div style="text-align:right"><h2>SHOP DRAWING</h2><div class="sub">${label ? `${escH(label)} · ` : ""}Part # ${escH(part.part_number)} · ${today}</div></div></div>
 <div class="tb">
-<div><b>Part Name</b>${esc(info.partName || "—")}</div>
-<div><b>Company</b>${esc(info.company || "—")}</div>
-<div><b>Contact</b>${esc(info.contact || "—")}</div>
-<div><b>Project / Job</b>${esc(info.project || "—")}</div>
+<div><b>Part Name</b>${escH(info.partName || "—")}</div>
+<div><b>Company</b>${escH(info.company || "—")}</div>
+<div><b>Contact</b>${escH(info.contact || "—")}</div>
+<div><b>Project / Job</b>${escH(info.project || "—")}</div>
 </div>
 <div class="tb">
-<div><b>Material</b>${esc(info.material || anyMat(part.material_code).name)}</div>
-<div><b>Type</b>${esc(t.name)}</div>
-<div><b>Quantity</b>${esc(info.qty || "—")}</div>
+<div><b>Material</b>${escH(info.material || anyMat(part.material_code).name)}</div>
+<div><b>Type</b>${escH(t.name)}</div>
+<div><b>Quantity</b>${escH(info.qty || "—")}</div>
 <div><b>Scale</b>NTS</div>
 </div>
 <div class="stage">${svg || '<div class="sub">(no preview available)</div>'}</div>
 <div class="geom">
 <table><thead><tr><th>Dimension</th><th style="text-align:right">Size</th><th style="text-align:right">Angle</th></tr></thead><tbody>${geomRows}</tbody></table>
-${info.notes ? `<div style="font-size:12px;margin-top:10px"><b>Notes:</b> ${esc(info.notes)}</div>` : ""}
+${info.notes ? `<div style="font-size:12px;margin-top:10px"><b>Notes:</b> ${escH(info.notes)}</div>` : ""}
 </div>
 <div class="ft"><div>Estimated for reference — Flash-Tech confirms feasibility &amp; final dimensions on your order.<div class="sig"><span>Approved By</span><span>Date</span></div></div>
 <div style="text-align:right">Generated by the Flash-Tech Contractor Portal<br>${today}</div></div>
-</div></body></html>`;
-  const w = window.open("", "_blank");
-  if (!w) { alert("Please allow pop-ups for this site to open the shop drawing."); return; }
-  w.document.write(html); w.document.close(); w.focus();
+</div>`;
+}
+
+function printShopDrawing(part, info) {
+  openPrintDoc(`Shop Drawing — ${info.partName || part.part_number}`, shopSheet(part, info));
+}
+
+// ─── SUBMITTAL PACKAGE (whole request → cover sheet + one page per made part) ──
+// Catalog SKUs are standard stock products, so they're listed on the cover for
+// completeness but get no geometry page. Anything built in the Custom Builder is
+// made to order and gets a full fabrication sheet.
+const itemToPart = (i) => {
+  const d = i.detail || {};
+  const t = typeById(d.flashing_type);
+  const isSheet = (t.kind || "sheet") === "sheet";
+  let bends = null;
+  // Built-in profiles don't store a bend count; derive it from the point list.
+  try { if (!t.custom && isSheet && !t.pan && !t.outlet) bends = profileBends(t.points(d.params)); }
+  catch (e) { /* leave null rather than print a wrong number on a shop document */ }
+  return {
+    part_number: i.sku || "—",
+    name: i.description,
+    flashing_type: d.flashing_type,
+    material_code: d.material_code,
+    params: d.params,
+    girth: d.girth,
+    bends,
+    piece_length_ft: d.piece_length_ft,
+  };
+};
+
+const isMadePart = (i) => i.item_kind === "custom" && i.detail && i.detail.params && i.detail.flashing_type;
+
+function printSubmittal({ req, items, contractor, info }) {
+  const made = items.filter(isMadePart);
+  const today = fmtDate(new Date().toISOString());
+  const company = info.company || contractor?.company || "—";
+  const contact = info.contact || contractor?.name || "—";
+  const project = info.project || req.job_name || "Untitled job";
+
+  let n = 0;
+  const rows = items.map((i) => {
+    const mk = isMadePart(i);
+    if (mk) n += 1;
+    return `<tr>
+<td><b>${escH(i.sku || "—")}</b></td>
+<td>${escH(i.description)}</td>
+<td class="r" style="white-space:nowrap">${escH(i.qty)} ${escH(unitLabel(i.unit))}</td>
+<td>${mk ? `<span class="pill pill-mk">Sheet ${n}</span>` : '<span class="pill pill-cat">Catalog stock</span>'}</td>
+</tr>`;
+  }).join("");
+
+  const cover = `<div class="sheet">
+<div class="hd"><div><img src="${FT_LOGO}" alt="Flash-Tech Mfg, Inc." style="height:44px;display:block"><div class="sub">${FT_INFO.addr} · ${FT_INFO.phone}</div></div>
+<div style="text-align:right"><h2>SUBMITTAL PACKAGE</h2><div class="sub">Request #${escH(req.id.slice(0, 8))} · ${today}</div></div></div>
+<div class="tb">
+<div><b>Project / Job</b>${escH(project)}</div>
+<div><b>Company</b>${escH(company)}</div>
+<div><b>Contact</b>${escH(contact)}</div>
+<div><b>Type</b>${req.req_type === "order" ? "Order" : "Quote"}</div>
+</div>
+<div class="tb">
+<div><b>PO Number</b>${escH(req.po_number || "—")}</div>
+<div><b>Needed By</b>${escH(req.needed_by ? fmtDate(req.needed_by) : "—")}</div>
+<div><b>Submitted</b>${escH(fmtDate(req.created_at))}</div>
+<div><b>Fabrication Sheets</b>${made.length}</div>
+</div>
+<div class="geom">
+<table><thead><tr><th>Part #</th><th>Description</th><th style="text-align:right">Qty</th><th>Drawing</th></tr></thead><tbody>${rows}</tbody></table>
+${req.notes ? `<div style="font-size:12px;margin-top:12px;white-space:pre-line"><b>Request notes:</b>\n${escH(req.notes)}</div>` : ""}
+${info.notes ? `<div style="font-size:12px;margin-top:10px"><b>Shop notes:</b> ${escH(info.notes)}</div>` : ""}
+<div style="font-size:11px;color:#6a7278;margin-top:12px">Catalog stock items are standard Flash-Tech products — their data sheets and standard drawings are in the portal's Downloads tab. The ${made.length} sheet${made.length === 1 ? "" : "s"} that follow${made.length === 1 ? "s" : ""} cover every made-to-order part on this request.</div>
+</div>
+<div class="ft"><div>Flash-Tech confirms feasibility &amp; final dimensions before fabrication.<div class="sig"><span>Approved By</span><span>Date</span></div></div>
+<div style="text-align:right">Generated by the Flash-Tech Contractor Portal<br>${today}</div></div>
+</div>`;
+
+  let m = 0;
+  const sheets = made.map((i) => {
+    m += 1;
+    const part = itemToPart(i);
+    const mfr = i.detail?.params?.mfr;
+    return shopSheet(part, {
+      partName: i.description,
+      company, contact, project,
+      material: anyMat(part.material_code).name + (mfr ? ` — ${mfr}` : ""),
+      qty: `${i.qty} ${unitLabel(i.unit)}`,
+      notes: info.notes || "",
+    }, `Sheet ${m} of ${made.length}`);
+  }).join("");
+
+  openPrintDoc(`Submittal — ${project} (#${req.id.slice(0, 8)})`, cover + sheets);
 }
 
 const STATUS_META = {
@@ -966,7 +1073,8 @@ function ProfileHowTo({ onClose }) {
 }
 
 // ─── CUSTOM FLASHING BUILDER ─────────────────────────────────
-function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc = (x) => x, discPct = 0, detectInfo = null, detectNonce = 0, seedType = null, seedNonce = 0, editItem = null, editNonce = 0 }) {
+function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc = (x) => x, discPct = 0, detectInfo = null, detectNonce = 0, seedType = null, seedNonce = 0, editItem = null, editNonce = 0, user = null }) {
+  const [subDraw, setSubDraw] = useState(null); // part being turned into a submittal sheet
   const [typeId, setTypeId] = useState("dripEdge");
   const [matCode, setMatCode] = useState("G26");
   const [params, setParams] = useState(defaultParams("dripEdge"));
@@ -1192,7 +1300,11 @@ function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc =
         ) : reference ? (
           <>
             <div className="note" style={{ marginBottom: 10 }}>Reference tool — build a part to see its part number, price &amp; 3D model. Final pricing is confirmed on the customer's quote.</div>
+            <button className="btn btn-p" style={{ width: "100%", justifyContent: "center", marginBottom: 8 }}
+              title="Print a title-blocked fabrication sheet for this part — no quote needed"
+              onClick={() => setSubDraw(custom)}>{IC.file}&nbsp;Print Submittal Sheet</button>
             {isSheet && !isOutlet && <button className="btn btn-o" style={{ width: "100%", justifyContent: "center" }} onClick={() => downloadDXF(`${partNo}.dxf`, partDXF(typeId, vp))}>{IC.print}&nbsp;Download DXF{isPan ? " (flat blank)" : " (profile)"}</button>}
+            {subDraw && <ShopDrawingModal part={subDraw} user={user} defaultQty={pieces ? `${pieces} ${isPan || isOutlet || !isSheet ? "ea" : "pcs"}` : ""} onClose={() => setSubDraw(null)} />}
           </>
         ) : (
           <>
@@ -1331,7 +1443,7 @@ function MyPartsPage({ parts, onAdd, onDel, disc = (x) => x, user = null }) {
 }
 
 // Title-block details for a shop drawing — auto-filled from the account, all editable.
-function ShopDrawingModal({ part, user, onClose }) {
+function ShopDrawingModal({ part, user, onClose, defaultQty = "" }) {
   const t = typeById(part.flashing_type);
   const autoMat = anyMat(part.material_code).name + (part.params?.mfr ? ` — ${part.params.mfr}` : "");
   const [f, setF] = useState({
@@ -1340,7 +1452,7 @@ function ShopDrawingModal({ part, user, onClose }) {
     contact: user?.name || "",
     project: "",
     material: autoMat,
-    qty: "",
+    qty: defaultQty,
     notes: "",
   });
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
@@ -1364,6 +1476,46 @@ function ShopDrawingModal({ part, user, onClose }) {
         <div className="fld"><label>Quantity (optional)</label><input value={f.qty} onChange={set("qty")} placeholder="e.g. 12 pcs" /></div>
       </div>
       <div className="fld"><label>Notes (optional)</label><textarea rows="2" value={f.notes} onChange={set("notes")} /></div>
+    </Modal>
+  );
+}
+
+// Whole-request submittal: a cover sheet listing every line, then one fabrication
+// sheet per made-to-order part — the package you hand the shop.
+function SubmittalModal({ req, items, contractor, onClose }) {
+  const made = items.filter(isMadePart);
+  const catalog = items.length - made.length;
+  const [f, setF] = useState({
+    company: contractor?.company || "",
+    contact: contractor?.name || "",
+    project: req.job_name || "",
+    notes: "",
+  });
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  return (
+    <Modal title={`Submittal Package — #${req.id.slice(0, 8)}`} onClose={onClose}
+      footer={<>
+        <button className="btn btn-o" onClick={onClose}>Cancel</button>
+        <button className="btn btn-p" disabled={!made.length} onClick={() => printSubmittal({ req, items, contractor, info: f })}>{IC.print}&nbsp;View / Download PDF</button>
+      </>}>
+      {made.length === 0 ? (
+        <div className="note" style={{ background: "#fffbeb", color: "#92400e" }}>
+          Every line on this request is a catalog stock part, so there's nothing to draw.
+          Standard drawings and data sheets for catalog products are in the Downloads tab.
+        </div>
+      ) : (
+        <div style={{ fontSize: 13, color: "var(--mut)", marginBottom: 12 }}>
+          <b style={{ color: "var(--ink)" }}>{made.length} fabrication sheet{made.length === 1 ? "" : "s"}</b> — one per made-to-order part, each with the full geometry, bend angles and stretch-out.
+          {catalog > 0 && <> {catalog} catalog stock item{catalog === 1 ? " is" : "s are"} listed on the cover sheet only.</>}
+          <br />The package opens in a new tab; use Print → Save as PDF.
+        </div>
+      )}
+      <div className="g2">
+        <div className="fld"><label>Company</label><input value={f.company} onChange={set("company")} /></div>
+        <div className="fld"><label>Contact</label><input value={f.contact} onChange={set("contact")} /></div>
+      </div>
+      <div className="fld"><label>Project / Job</label><input value={f.project} onChange={set("project")} placeholder="e.g. Smith Residence Re-roof" /></div>
+      <div className="fld"><label>Shop notes (optional)</label><textarea rows="2" value={f.notes} onChange={set("notes")} placeholder="Anything the shop needs to know — appears on the cover and every sheet." /></div>
     </Modal>
   );
 }
@@ -1466,6 +1618,7 @@ function RequestDetail({ req, items, msgs, role, contractor, user, onBack, onSen
   const [quote, setQuote] = useState(req.admin_quote_total || "");
   const [po, setPo] = useState(req.po_number || "");
   const [converting, setConverting] = useState(false);
+  const [submittal, setSubmittal] = useState(false);
   const convert = async () => {
     if (!window.confirm("Convert this quote to an order? Flash-Tech will be notified to begin processing it.")) return;
     setConverting(true);
@@ -1492,8 +1645,15 @@ function RequestDetail({ req, items, msgs, role, contractor, user, onBack, onSen
     <div>
       <div className="row" style={{ marginBottom: 14, justifyContent: "space-between" }}>
         <button className="btn btn-o btn-sm" onClick={onBack}>{IC.back}&nbsp;Back to all requests</button>
-        <button className="btn btn-o btn-sm" onClick={doPrint}>{IC.print}&nbsp;Print Quote</button>
+        <span className="row" style={{ gap: 8 }}>
+          {role === "admin" && (
+            <button className="btn btn-p btn-sm" title="Cover sheet plus a full fabrication drawing for every made-to-order part — hand this to the shop"
+              onClick={() => setSubmittal(true)}>{IC.file}&nbsp;Submittal Package</button>
+          )}
+          <button className="btn btn-o btn-sm" onClick={doPrint}>{IC.print}&nbsp;Print Quote</button>
+        </span>
       </div>
+      {submittal && <SubmittalModal req={req} items={myItems} contractor={contractor || user} onClose={() => setSubmittal(false)} />}
       <div className="g2" style={{ gridTemplateColumns: "1.5fr 1fr", alignItems: "start" }}>
         <div className="card">
           <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap", marginBottom: 4 }}>
@@ -2729,14 +2889,25 @@ export default function App() {
     </div>
   ) : null;
 
+  // Dev-only. Shown when localhost has no server credentials of its own and is
+  // therefore falling through to the deployed function — i.e. everything you do
+  // here is happening to real customer data. Pinned to the bottom so it can't
+  // collide with maintBanner. See README → "Local development".
+  const prodBanner = USING_PRODUCTION_DATA ? (
+    <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, zIndex: 9999, background: "#b3121b", color: "#fff", borderTop: "3px solid #ff5a63", padding: "9px 16px", textAlign: "center", fontFamily: "'Barlow',Arial,sans-serif", fontSize: 13, letterSpacing: ".02em", boxShadow: "0 -4px 14px rgba(0,0,0,.3)" }}>
+      ⚠️ <b>PRODUCTION DATA</b> — this localhost session is reading and writing the live database. Don't create test records or delete anything.
+    </div>
+  ) : null;
+
   // ─── render ───
   if (resetToken && !session) {
-    return (<><style>{CSS}</style><ResetPassword token={resetToken} onDone={() => { try { window.history.replaceState({}, "", window.location.pathname); } catch (e) {} setResetToken(null); }} /></>);
+    return (<><style>{CSS}</style>{prodBanner}<ResetPassword token={resetToken} onDone={() => { try { window.history.replaceState({}, "", window.location.pathname); } catch (e) {} setResetToken(null); }} /></>);
   }
   if (!session && guest) {
     return (
       <>
         <style>{CSS}</style>
+        {prodBanner}
         <div className="main" style={{ margin: "0 auto", maxWidth: 1100 }}>
           <div className="topbar">
             <div><h1>Custom Flashing Builder</h1><div className="sub">Guest preview — Flash-Tech Mfg, Inc.</div></div>
@@ -2747,8 +2918,8 @@ export default function App() {
       </>
     );
   }
-  if (!session) return (<><style>{CSS}</style>{maintBanner}<LoginScreen onLogin={login} onGuest={() => setGuest(true)} dbError={dbError} /></>);
-  if (mustChangePw) return (<><style>{CSS}</style>{maintBanner}<ForcePasswordChange user={session} onDone={(u) => { setSession(u); setMustChangePw(false); setPage(u.role === "admin" || u.role === "distributor" ? "dashboard" : "shop"); }} /></>);
+  if (!session) return (<><style>{CSS}</style>{maintBanner}{prodBanner}<LoginScreen onLogin={login} onGuest={() => setGuest(true)} dbError={dbError} /></>);
+  if (mustChangePw) return (<><style>{CSS}</style>{maintBanner}{prodBanner}<ForcePasswordChange user={session} onDone={(u) => { setSession(u); setMustChangePw(false); setPage(u.role === "admin" || u.role === "distributor" ? "dashboard" : "shop"); }} /></>);
 
   const nav = isAdmin
     ? [["dashboard", "Dashboard", IC.home], ["requests", "Requests", IC.list], ["customers", "Customers", IC.users], ["team", "Team", IC.shield], ["catalog", "Catalog", IC.box], ["pricing", "Pricing", IC.tag], ["builder", "Custom Builder", IC.wrench], ["downloads", "Downloads", IC.download]]
@@ -2775,7 +2946,7 @@ export default function App() {
   return (
     <>
       <style>{CSS}</style>
-      {maintBanner}
+      {maintBanner}{prodBanner}
       <div className="app">
         <div className={"side-backdrop" + (menuOpen ? " open" : "")} onClick={() => setMenuOpen(false)} />
         <aside className={"side" + (menuOpen ? " open" : "")}>
@@ -2831,7 +3002,7 @@ export default function App() {
           {page === "shop" && !isAdmin && !isDist && <ShopPage products={products} discPct={discPct} onPickCategory={openCategory} onBuilder={openBuilder} />}
           {page === "catalog" && isAdmin && <CatalogPage products={products} readOnly />}
           {page === "catalog" && !isAdmin && <CatalogPage products={products} onAdd={isDist && !actingCustomer ? null : addProduct} readOnly={isDist && !actingCustomer} disc={applyDisc} discPct={discPct} seedCat={catSeed.cat} seedNonce={catSeed.nonce} />}
-          {page === "builder" && isAdmin && <BuilderPage reference guest={false} onAddToCart={() => {}} onSavePart={() => {}} />}
+          {page === "builder" && isAdmin && <BuilderPage reference guest={false} user={session} onAddToCart={() => {}} onSavePart={() => {}} />}
           {page === "builder" && !isAdmin && <BuilderPage guest={false} reference={isDist && !actingCustomer} onAddToCart={addCustom} onSavePart={isDist ? () => {} : savePart} disc={applyDisc} discPct={discPct} detectInfo={camResult} detectNonce={camNonce} seedType={bSeed.type} seedNonce={bSeed.nonce} editItem={editSeed.item} editNonce={editSeed.nonce} />}
           {page === "cart" && !isAdmin && <CartPage cart={cart} onRemove={(k) => setCart((c) => c.filter((i) => i.key !== k))} onClear={() => setCart([])} onSubmit={submitRequest} busy={busy} user={isDist ? actingCustomer : session} forCustomer={isDist ? actingCustomer : null} needsCustomer={isDist && !actingCustomer} onQty={setCartQty} onEdit={editCartItem} />}
           {page === "parts" && !isAdmin && !isDist && <MyPartsPage parts={parts} onAdd={addCustom} onDel={delPart} disc={applyDisc} discPct={discPct} user={session} />}
