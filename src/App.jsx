@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { api, getToken, setToken } from "./api.js";
 import Flashing3D from "./Flashing3D.jsx";
 import SinglePly3D from "./SinglePly3D.jsx";
@@ -7,8 +8,10 @@ import {
   profileGirth, profileBends, piecePrice, customPartNumber, customDescription, defaultParams,
   membranePrice, membranePartNumber, membraneDescription,
   scupperPrice, scupperPartNumber, scupperSides, scupperTier, productImage, POPULAR_SKUS,
-  customProfilePoints, panPrice, panPartNumber, panDescription, panBlank, partDXF,
+  customProfilePoints, customProfileStretch, panPrice, panPartNumber, panDescription, panBlank, partDXF,
   DRAWINGS, drawingsByCategory, copingExtras, DATASHEETS,
+  PRICING, applyPricing, categoryAdjust, categoryPct,
+  gutterExtras, outletPrice, outletPartNumber, outletDescription, outletSize,
 } from "./catalog.js";
 
 // ─── UTILITIES ───────────────────────────────────────────────
@@ -125,6 +128,92 @@ button{margin-bottom:18px;padding:9px 18px;background:#0aa810;color:#fff;border:
   w.document.write(html); w.document.close(); w.focus();
 }
 
+// ─── PRINTABLE SHOP DRAWING (from a saved custom part) ───────
+// Renders the part's 3D preview to static SVG and lays it out on a title-blocked
+// drawing sheet with the full geometry (sizes + angles) and material spec.
+function partPreviewSvg(part, height = 380) {
+  try {
+    const t = typeById(part.flashing_type);
+    const isSheet = (t.kind || "sheet") === "sheet";
+    if (t.pan) return renderToStaticMarkup(<Pan3D p={part.params} height={height} />);
+    if (t.outlet || !isSheet) return renderToStaticMarkup(<SinglePly3D geo={t.geometry(part.params)} materialCode={part.material_code} split={!!(part.params || {}).split} height={height} />);
+    const pts = t.custom ? customProfilePoints((part.params || {}).segs || []) : t.points(part.params);
+    return renderToStaticMarkup(<Flashing3D points={pts} lengthFt={part.piece_length_ft || 10} materialCode={part.material_code} height={height} letters={t.letters ? t.letters(part.params) : null} />);
+  } catch (e) { console.error("drawing preview failed", e); return ""; }
+}
+function printShopDrawing(part, info) {
+  const esc = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+  const t = typeById(part.flashing_type);
+  const isSheet = (t.kind || "sheet") === "sheet";
+  const p = part.params || {};
+  // Geometry rows: every dimension + angle. Custom profiles list their segments A/B/C…
+  let geomRows = "";
+  if (t.custom) {
+    geomRows = (p.segs || []).map((s, i) => {
+      const U = String.fromCharCode(65 + i);
+      const ang = i === 0 ? (parseFloat(s.ang) ? `start ${s.ang}°` : "—") : `${s.ang}° bend`;
+      return `<tr><td>Segment ${U}</td><td class="r">${Math.round((parseFloat(s.len) || 0) * 100) / 100}"</td><td class="r">${ang}</td></tr>`;
+    }).join("");
+    geomRows += `<tr><td><b>Stretch-out</b></td><td class="r"><b>${customProfileStretch(p.segs || [])}"</b></td><td class="r">${Math.max(0, (p.segs || []).length - 1)} bends</td></tr>`;
+  } else {
+    geomRows = (t.fields || []).map((f) => {
+      const v = p[f.key];
+      const label = f.type === "choice" ? ((f.options.find((o) => o.value === v) || {}).label || v) : `${v}${String(f.label).includes("(°)") ? "°" : '"'}`;
+      return `<tr><td>${esc(f.label)}</td><td class="r" colspan="2">${esc(label)}</td></tr>`;
+    }).join("");
+    if (part.girth) geomRows += `<tr><td><b>Stretch-out</b></td><td class="r" colspan="2"><b>${part.girth}"</b>${part.bends ? ` · ${part.bends} bends` : ""}</td></tr>`;
+  }
+  if (isSheet && !t.pan && !t.outlet) geomRows += `<tr><td>Piece length</td><td class="r" colspan="2">${part.piece_length_ft || 10}'-0"</td></tr>`;
+  const svg = partPreviewSvg(part);
+  const today = fmtDate(new Date().toISOString());
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Shop Drawing — ${esc(info.partName || part.part_number)}</title>
+<style>body{font-family:Arial,Helvetica,sans-serif;color:#23282b;margin:30px;}
+.sheet{border:2px solid #23282b;}
+.hd{display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #23282b;padding:12px 16px}
+.hd h2{margin:0;font-size:20px;letter-spacing:.06em}
+.sub{font-size:11px;color:#6a7278}
+.tb{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:2px solid #23282b;font-size:12px}
+.tb>div{padding:7px 10px;border-right:1px solid #c9cdd0}.tb>div:last-child{border-right:none}
+.tb b{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#6a7278;margin-bottom:2px;font-weight:700}
+.stage{padding:18px;text-align:center;background:#fbfcfc}
+.stage svg{max-width:100%;height:auto;max-height:430px}
+.geom{padding:0 16px 14px}
+table{width:100%;border-collapse:collapse;font-size:12px;margin-top:10px}
+th{background:#2b2f31;color:#fff;text-align:left;padding:7px 8px;font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+td{padding:6px 8px;border-bottom:1px solid #e3e6e8}.r{text-align:right}
+.ft{display:flex;justify-content:space-between;gap:16px;border-top:2px solid #23282b;padding:10px 16px;font-size:11px;color:#6a7278}
+.sig{display:flex;gap:40px;margin-top:6px}.sig span{border-top:1px solid #23282b;padding-top:3px;min-width:170px;display:inline-block}
+button{margin-bottom:16px;padding:9px 18px;background:#0aa810;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer}
+@media print{button{display:none}body{margin:12px}}</style></head><body>
+<button onclick="window.print()">🖨 Print / Save as PDF</button>
+<div class="sheet">
+<div class="hd"><div><img src="${FT_LOGO}" alt="Flash-Tech Mfg, Inc." style="height:44px;display:block"><div class="sub">${FT_INFO.addr} · ${FT_INFO.phone}</div></div>
+<div style="text-align:right"><h2>SHOP DRAWING</h2><div class="sub">Part # ${esc(part.part_number)} · ${today}</div></div></div>
+<div class="tb">
+<div><b>Part Name</b>${esc(info.partName || "—")}</div>
+<div><b>Company</b>${esc(info.company || "—")}</div>
+<div><b>Contact</b>${esc(info.contact || "—")}</div>
+<div><b>Project / Job</b>${esc(info.project || "—")}</div>
+</div>
+<div class="tb">
+<div><b>Material</b>${esc(info.material || anyMat(part.material_code).name)}</div>
+<div><b>Type</b>${esc(t.name)}</div>
+<div><b>Quantity</b>${esc(info.qty || "—")}</div>
+<div><b>Scale</b>NTS</div>
+</div>
+<div class="stage">${svg || '<div class="sub">(no preview available)</div>'}</div>
+<div class="geom">
+<table><thead><tr><th>Dimension</th><th style="text-align:right">Size</th><th style="text-align:right">Angle</th></tr></thead><tbody>${geomRows}</tbody></table>
+${info.notes ? `<div style="font-size:12px;margin-top:10px"><b>Notes:</b> ${esc(info.notes)}</div>` : ""}
+</div>
+<div class="ft"><div>Estimated for reference — Flash-Tech confirms feasibility &amp; final dimensions on your order.<div class="sig"><span>Approved By</span><span>Date</span></div></div>
+<div style="text-align:right">Generated by the Flash-Tech Contractor Portal<br>${today}</div></div>
+</div></body></html>`;
+  const w = window.open("", "_blank");
+  if (!w) { alert("Please allow pop-ups for this site to open the shop drawing."); return; }
+  w.document.write(html); w.document.close(); w.focus();
+}
+
 const STATUS_META = {
   new: { label: "New", cls: "b-new" },
   in_review: { label: "In Review", cls: "b-review" },
@@ -180,6 +269,7 @@ const IC = {
   shield: <I d={<><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /><polyline points="9 12 11 14 15 10" /></>} />,
   download: <I d={<><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></>} />,
   file: <I d={<><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></>} />,
+  tag: <I d={<><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.83z" /><line x1="7" y1="7" x2="7.01" y2="7" /></>} />,
 };
 
 // ─── STYLES ──────────────────────────────────────────────────
@@ -876,7 +966,7 @@ function ProfileHowTo({ onClose }) {
 }
 
 // ─── CUSTOM FLASHING BUILDER ─────────────────────────────────
-function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc = (x) => x, discPct = 0, detectInfo = null, detectNonce = 0, seedType = null, seedNonce = 0 }) {
+function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc = (x) => x, discPct = 0, detectInfo = null, detectNonce = 0, seedType = null, seedNonce = 0, editItem = null, editNonce = 0 }) {
   const [typeId, setTypeId] = useState("dripEdge");
   const [matCode, setMatCode] = useState("G26");
   const [params, setParams] = useState(defaultParams("dripEdge"));
@@ -888,6 +978,8 @@ function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc =
   const [drawSpan, setDrawSpan] = useState(10); // canvas size in inches (zoom); smaller = easier small segments
   const [showDemo, setShowDemo] = useState(false);
   const [howToSeen, setHowToSeen] = useState(false);
+  const [profView, setProfView] = useState("2d"); // custom profile preview: 2d cross-section or 3d piece
+  const [editKey, setEditKey] = useState(null);   // cart-line key being edited (Add button replaces it)
 
   const t = typeById(typeId);
   const isSheet = (t.kind || "sheet") === "sheet";
@@ -896,6 +988,7 @@ function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc =
   // values mid-edit (so you can clear and retype) without breaking the live preview.
   const isCustom = isSheet && !!t.custom;
   const isPan = isSheet && !!t.pan;
+  const isOutlet = isSheet && !!t.outlet;
   const vp = useMemo(() => {
     const o = { ...params };
     for (const f of t.fields) {
@@ -910,29 +1003,35 @@ function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc =
     return o;
   }, [t, params]);
 
-  // sheet-metal path. Custom drawn profiles are always priced as a 10' piece. Box/pan caps are priced each.
-  const effLen = isCustom ? 10 : lenFt;
-  const pts = useMemo(() => (isSheet && !isPan ? t.points(vp) : []), [isSheet, isPan, t, vp]);
-  const girth = (isSheet && !isPan) ? profileGirth(pts) : 0;
-  const bends = (isSheet && !isPan) ? profileBends(pts) : 0;
-  // single-ply membrane path
-  const geo = useMemo(() => (isSheet ? null : t.geometry(vp)), [isSheet, t, vp]);
+  // sheet-metal path. Custom drawn profiles + fixed-length types (box gutter) are priced per 10' piece.
+  // Box/pan caps and drop outlets are priced each.
+  const effLen = isCustom || t.fixedLen ? (t.fixedLen || 10) : lenFt;
+  const hasProfile = isSheet && !isPan && !isOutlet;
+  const pts = useMemo(() => (hasProfile ? t.points(vp) : []), [hasProfile, t, vp]);
+  const girth = hasProfile ? profileGirth(pts) : 0;
+  const bends = hasProfile ? profileBends(pts) : 0;
+  // revolved geometry path (single-ply membrane parts + metal drop outlets)
+  const geo = useMemo(() => (t.geometry ? t.geometry(vp) : null), [t, vp]);
   const split = !!vp.split;
   const isScupper = !isSheet && geo && geo.shape === "scupper";
 
   const basePiece = isPan ? panPrice(vp, matCode)
+    : isOutlet ? outletPrice(vp, matCode)
     : isSheet ? piecePrice(girth, bends, effLen, matCode)
     : isScupper ? scupperPrice(geo, matCode)
     : membranePrice(geo, matCode, split, vp.mil);
-  // Coping cleats + splice plates add cost on top of the coping profile.
+  // Coping cleats/splice plates and box-gutter clips add cost on top of the profile.
   const coping = (typeId === "coping" && !isPan) ? copingExtras(vp, girth, effLen) : { cleat: 0, splice: 0, total: 0 };
-  const perPiece = basePiece == null ? null : Math.round((basePiece + coping.total) * 100) / 100;
-  const perLF = (isSheet && !isPan && perPiece != null) ? Math.round((perPiece / effLen) * 100) / 100 : null;
+  const gutter = t.gutter ? gutterExtras(vp) : { clips: 0, each: 0, total: 0 };
+  const perPiece = basePiece == null ? null : Math.round((basePiece + coping.total + gutter.total) * 100) / 100;
+  const perLF = (hasProfile && perPiece != null) ? Math.round((perPiece / effLen) * 100) / 100 : null;
   const partNo = isPan ? panPartNumber(matCode, vp)
+    : isOutlet ? outletPartNumber(matCode, vp)
     : isSheet ? customPartNumber(typeId, matCode, girth)
     : isScupper ? scupperPartNumber(matCode, geo)
     : membranePartNumber(typeId, matCode, geo, split);
   const desc = isPan ? panDescription(matCode, vp)
+    : isOutlet ? outletDescription(matCode, vp)
     : isSheet ? customDescription(typeId, matCode, vp, effLen, girth)
     : membraneDescription(typeId, matCode, vp, split);
   const total = perPiece == null ? null : Math.round(perPiece * pieces * 100) / 100;
@@ -957,8 +1056,23 @@ function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc =
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seedNonce]);
-  const custom = isPan
-    ? { part_number: partNo, name: name || `${t.name} ${vp.length}×${vp.width}×${vp.height}`, flashing_type: typeId, material_code: matCode, params: vp, girth: null, bends: null, piece_length_ft: null, price_per_piece: perPiece, description: desc }
+  // "Edit" from the cart — reload the item's full configuration; Add replaces that cart line.
+  useEffect(() => {
+    if (editNonce && editItem?.detail) {
+      const d = editItem.detail;
+      if (!typeById(d.flashing_type)) return;
+      setTypeId(d.flashing_type);
+      setParams({ ...defaultParams(d.flashing_type), ...(d.params || {}) });
+      setMatCode(d.material_code || "G26");
+      if (d.piece_length_ft) setLenFt(d.piece_length_ft);
+      setPieces(editItem.qty || 1);
+      setEditKey(editItem.key);
+      setSaved(""); setDrawMode(false); setProfView("2d"); setHowToSeen(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editNonce]);
+  const custom = (isPan || isOutlet)
+    ? { part_number: partNo, name: name || (isPan ? `${t.name} ${vp.length}×${vp.width}×${vp.height}` : `${t.name} ${outletSize(vp.size).label}`), flashing_type: typeId, material_code: matCode, params: vp, girth: null, bends: null, piece_length_ft: null, price_per_piece: perPiece, description: desc }
     : isSheet
     ? { part_number: partNo, name: name || `${t.name} ${girth}"`, flashing_type: typeId, material_code: matCode, params: vp, girth, bends, piece_length_ft: effLen, price_per_piece: perPiece, description: desc }
     : { part_number: partNo, name: name || `${split ? "Split " : ""}${t.name}`, flashing_type: typeId, material_code: matCode, params: vp, girth: null, bends: null, piece_length_ft: null, price_per_piece: perPiece, description: desc };
@@ -1024,6 +1138,13 @@ function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc =
                 <select value={matColor} onChange={(e) => setMatCode(`${matType}-${e.target.value}`)}>{MEMBRANE_COLORS.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}</select>
               </div>
             </div>
+            <div className="fld"><label>Membrane Manufacturer</label>
+              <select value={params.mfr || ""} onChange={(e) => setParams((pp) => ({ ...pp, mfr: e.target.value }))}>
+                <option value="">Select the {matType} brand…</option>
+                {BUILDER_MFRS.map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+              <div style={{ fontSize: 12, color: "var(--mut)", marginTop: 4 }}>Which membrane this part should be made to match — shown on your quote and shop drawing.</div>
+            </div>
           </>
         )}
         {isCustom && <ProfileEditor segs={params.segs || []} onChange={(segs) => setParams((pp) => ({ ...pp, segs }))} />}
@@ -1045,15 +1166,15 @@ function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc =
             </div>
           </div>
         )}
-        {isPan ? (
+        {(isPan || isOutlet) ? (
           <div className="fld"><label>Quantity (each)</label>
             <input type="number" min="1" value={pieces} onChange={(e) => setPieces(Math.max(1, parseInt(e.target.value) || 1))} />
           </div>
         ) : isSheet ? (
           <div className="g2">
             <div className="fld"><label>Piece Length (ft)</label>
-              {isCustom
-                ? <input value={`10'-0"`} disabled title="Custom profiles are priced per 10' piece" />
+              {isCustom || t.fixedLen
+                ? <input value={`${t.fixedLen || 10}'-0"`} disabled title={t.fixedLen ? `${t.name} comes in ${t.fixedLen}' sections` : "Custom profiles are priced per 10' piece"} />
                 : <select value={lenFt} onChange={(e) => setLenFt(parseFloat(e.target.value))}>{[8, 10, 12].map((l) => <option key={l} value={l}>{l}'-0"</option>)}</select>}
             </div>
             <div className="fld"><label># of Pieces</label>
@@ -1071,13 +1192,14 @@ function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc =
         ) : reference ? (
           <>
             <div className="note" style={{ marginBottom: 10 }}>Reference tool — build a part to see its part number, price &amp; 3D model. Final pricing is confirmed on the customer's quote.</div>
-            {isSheet && <button className="btn btn-o" style={{ width: "100%", justifyContent: "center" }} onClick={() => downloadDXF(`${partNo}.dxf`, partDXF(typeId, vp))}>{IC.print}&nbsp;Download DXF{isPan ? " (flat blank)" : " (profile)"}</button>}
+            {isSheet && !isOutlet && <button className="btn btn-o" style={{ width: "100%", justifyContent: "center" }} onClick={() => downloadDXF(`${partNo}.dxf`, partDXF(typeId, vp))}>{IC.print}&nbsp;Download DXF{isPan ? " (flat blank)" : " (profile)"}</button>}
           </>
         ) : (
           <>
             {saved && <div className="note">{saved}</div>}
+            {editKey && <div className="note" style={{ background: "#fffbeb", color: "#92400e" }}>✏️ Editing a cart item — “Update Cart Item” replaces it with this configuration.</div>}
             <div className="row">
-              <button className="btn btn-p grow" style={{ justifyContent: "center" }} onClick={() => { onAddToCart(custom, pieces); setSaved("Added to your request cart."); }}>{IC.cart}&nbsp;Add to Cart</button>
+              <button className="btn btn-p grow" style={{ justifyContent: "center" }} onClick={() => { onAddToCart(custom, pieces, editKey); setSaved(editKey ? "Cart item updated." : "Added to your request cart."); setEditKey(null); }}>{IC.cart}&nbsp;{editKey ? "Update Cart Item" : "Add to Cart"}</button>
               <button className="btn btn-o" onClick={async () => { await onSavePart(custom); setSaved("Saved to My Parts."); }}>{IC.bookmark}&nbsp;Save</button>
             </div>
           </>
@@ -1086,7 +1208,13 @@ function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc =
       <div>
         {isCustom && (
           <div className="row" style={{ marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
-            {!drawMode && <button className="btn btn-p btn-sm" onClick={() => { setParams((pp) => ({ ...pp, segs: [] })); setDrawMode(true); }}>✏️&nbsp;Draw New</button>}
+            {!drawMode && <button className="btn btn-p btn-sm" onClick={() => { setParams((pp) => ({ ...pp, segs: [] })); setDrawMode(true); setProfView("2d"); }}>✏️&nbsp;Draw New</button>}
+            {!drawMode && (
+              <span className="zoomctl">
+                <button className={`btn btn-sm ${profView === "2d" ? "btn-p" : "btn-o"}`} onClick={() => setProfView("2d")}>2D</button>
+                <button className={`btn btn-sm ${profView === "3d" ? "btn-p" : "btn-o"}`} title="View the finished 10' piece at an angle" onClick={() => setProfView("3d")}>3D</button>
+              </span>
+            )}
             <button className="btn btn-o btn-sm" onClick={() => setShowDemo(true)}>❔&nbsp;How-To</button>
             {(params.segs || []).length > 0 && <button className="btn btn-o btn-sm" onClick={() => setParams((pp) => ({ ...pp, segs: (pp.segs || []).slice(0, -1) }))}>Undo Point</button>}
             {drawMode && <button className="btn btn-p btn-sm" onClick={() => setDrawMode(false)}>Finish</button>}
@@ -1104,10 +1232,14 @@ function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc =
         <div className="preview3d">
           {isPan
             ? <Pan3D p={vp} height={300} />
+            : isOutlet
+            ? <SinglePly3D geo={geo} materialCode={matCode} split={false} height={300} />
             : isSheet
             ? (isCustom
-                ? <ProfileCanvas segs={params.segs || []} onChange={(segs) => setParams((pp) => ({ ...pp, segs }))} drawMode={drawMode} onFinish={() => setDrawMode(false)} span={drawSpan} height={300} />
-                : <Flashing3D points={pts} lengthFt={lenFt} materialCode={matCode} height={300} />)
+                ? (profView === "3d" && !drawMode
+                    ? <Flashing3D points={customProfilePoints(vp.segs || [])} lengthFt={10} materialCode={matCode} height={300} />
+                    : <ProfileCanvas segs={params.segs || []} onChange={(segs) => setParams((pp) => ({ ...pp, segs }))} drawMode={drawMode} onFinish={() => setDrawMode(false)} span={drawSpan} height={300} />)
+                : <Flashing3D points={pts} lengthFt={effLen} materialCode={matCode} height={300} letters={t.letters ? t.letters(vp) : null} />)
             : <SinglePly3D geo={geo} materialCode={matCode} split={split} height={300} />}
         </div>
         <div className="spec">
@@ -1117,11 +1249,17 @@ function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc =
             <div><span>Flat Blank</span><b>{panBlank(vp).l}×{panBlank(vp).w}"</b></div>
             <div><span>Each</span><b>{priceTxt(perPiece)}</b></div>
             <div><span>{pieces} each</span><b>{priceTxt(total)}</b></div>
+          </>) : isOutlet ? (<>
+            <div><span>Outlet</span><b>{outletSize(vp.size).label}</b></div>
+            <div><span>Drop</span><b>{vp.drop}"</b></div>
+            <div><span>Each</span><b>{priceTxt(perPiece)}</b></div>
+            <div><span>{pieces} each</span><b>{priceTxt(total)}</b></div>
           </>) : isSheet ? (<>
             <div><span>Stretch-Out</span><b>{girth}"</b></div>
             <div><span>Bends</span><b>{bends}</b></div>
             {coping.cleat > 0 && <div><span>Cleat</span><b>+{priceTxt(coping.cleat)}</b></div>}
             {coping.splice > 0 && <div><span>Splice Plates</span><b>+{priceTxt(coping.splice)}</b></div>}
+            {gutter.clips > 0 && <div><span>Clips ({gutter.clips} @ {fmt(gutter.each)})</span><b>+{priceTxt(gutter.total)}</b></div>}
             <div><span>Per Piece ({effLen}')</span><b>{priceTxt(perPiece)}</b></div>
             <div><span>Per Lin. Ft</span><b>{priceTxt(perLF)}</b></div>
             <div><span>{pieces} pcs ({pieces * effLen} LF)</span><b>{priceTxt(total)}</b></div>
@@ -1155,40 +1293,86 @@ function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc =
 }
 
 // ─── MY SAVED PARTS ──────────────────────────────────────────
-function MyPartsPage({ parts, onAdd, onDel, disc = (x) => x }) {
+function MyPartsPage({ parts, onAdd, onDel, disc = (x) => x, user = null }) {
   const [qty, setQty] = useState({});
+  const [drawing, setDrawing] = useState(null); // part getting a shop drawing
   if (!parts.length) return <div className="card" style={{ color: "var(--mut)" }}>No saved custom parts yet — build one in the Custom Flashing Builder and hit Save.</div>;
   return (
     <div className="g2">
       {parts.map((p) => {
         const t = typeById(p.flashing_type);
         const isSheet = (t.kind || "sheet") === "sheet";
+        const eachLike = t.pan || t.outlet || !isSheet;
         return (
           <div className="card" key={p.id}>
             <div className="row" style={{ justifyContent: "space-between" }}>
               <b>{p.name || t.name}</b>
               <button className="btn btn-d btn-sm" onClick={() => onDel(p)}>{IC.trash}</button>
             </div>
-            <div style={{ fontSize: 13, color: "var(--mut)", margin: "2px 0 8px" }}>{p.part_number} — {anyMat(p.material_code).name} — {p.price_per_piece == null ? "By request" : fmt(disc(p.price_per_piece))}{isSheet ? `/pc (${p.piece_length_ft}')` : " ea"}</div>
+            <div style={{ fontSize: 13, color: "var(--mut)", margin: "2px 0 8px" }}>{p.part_number} — {anyMat(p.material_code).name} — {p.price_per_piece == null ? "By request" : fmt(disc(p.price_per_piece))}{eachLike ? " ea" : `/pc (${p.piece_length_ft}')`}</div>
             <div className="preview3d">
-              {isSheet
-                ? <Flashing3D points={t.points(p.params)} lengthFt={p.piece_length_ft} materialCode={p.material_code} height={150} showDims={false} />
-                : <SinglePly3D geo={t.geometry(p.params)} materialCode={p.material_code} split={!!p.params.split} height={150} />}
+              {t.pan
+                ? <Pan3D p={p.params} height={150} showLabels={false} />
+                : (t.outlet || !isSheet)
+                ? <SinglePly3D geo={t.geometry(p.params)} materialCode={p.material_code} split={!!p.params.split} height={150} />
+                : <Flashing3D points={t.custom ? customProfilePoints(p.params.segs || []) : t.points(p.params)} lengthFt={p.piece_length_ft} materialCode={p.material_code} height={150} showDims={false} />}
             </div>
-            <div className="row" style={{ marginTop: 10 }}>
-              <input type="number" min="1" placeholder={isSheet ? "# pieces" : "# each"} style={{ width: 100 }} value={qty[p.id] || ""} onChange={(e) => setQty({ ...qty, [p.id]: e.target.value })} />
+            <div className="row" style={{ marginTop: 10, flexWrap: "wrap" }}>
+              <input type="number" min="1" placeholder={eachLike ? "# each" : "# pieces"} style={{ width: 100 }} value={qty[p.id] || ""} onChange={(e) => setQty({ ...qty, [p.id]: e.target.value })} />
               <button className="btn btn-lime btn-sm" onClick={() => { const n = parseInt(qty[p.id]); if (n > 0) { onAdd(p, n); setQty({ ...qty, [p.id]: "" }); } }}>{IC.plus}Add to Cart</button>
+              <button className="btn btn-o btn-sm" title="Generate a title-blocked shop drawing PDF" onClick={() => setDrawing(p)}>{IC.file}&nbsp;Shop Drawing</button>
             </div>
           </div>
         );
       })}
+      {drawing && <ShopDrawingModal part={drawing} user={user} onClose={() => setDrawing(null)} />}
     </div>
   );
 }
 
+// Title-block details for a shop drawing — auto-filled from the account, all editable.
+function ShopDrawingModal({ part, user, onClose }) {
+  const t = typeById(part.flashing_type);
+  const autoMat = anyMat(part.material_code).name + (part.params?.mfr ? ` — ${part.params.mfr}` : "");
+  const [f, setF] = useState({
+    partName: part.name || t.name,
+    company: user?.company || "",
+    contact: user?.name || "",
+    project: "",
+    material: autoMat,
+    qty: "",
+    notes: "",
+  });
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  return (
+    <Modal title={`Shop Drawing — ${part.part_number}`} onClose={onClose}
+      footer={<>
+        <button className="btn btn-o" onClick={onClose}>Cancel</button>
+        <button className="btn btn-p" onClick={() => printShopDrawing(part, f)}>{IC.print}&nbsp;View / Download PDF</button>
+      </>}>
+      <div style={{ fontSize: 13, color: "var(--mut)", marginBottom: 12 }}>These fill the drawing's title block — everything is editable. The drawing opens in a new tab; use Print → Save as PDF to download it.</div>
+      <div className="g2">
+        <div className="fld"><label>Part Name / Model</label><input value={f.partName} onChange={set("partName")} /></div>
+        <div className="fld"><label>Company</label><input value={f.company} onChange={set("company")} /></div>
+      </div>
+      <div className="g2">
+        <div className="fld"><label>Contact</label><input value={f.contact} onChange={set("contact")} /></div>
+        <div className="fld"><label>Project / Job</label><input value={f.project} onChange={set("project")} placeholder="e.g. Smith Residence Re-roof" /></div>
+      </div>
+      <div className="g2">
+        <div className="fld"><label>Material (incl. manufacturer)</label><input value={f.material} onChange={set("material")} /></div>
+        <div className="fld"><label>Quantity (optional)</label><input value={f.qty} onChange={set("qty")} placeholder="e.g. 12 pcs" /></div>
+      </div>
+      <div className="fld"><label>Notes (optional)</label><textarea rows="2" value={f.notes} onChange={set("notes")} /></div>
+    </Modal>
+  );
+}
+
 // ─── CART / SUBMIT REQUEST ───────────────────────────────────
-const MEMBRANE_MFRS = ["Carlisle SynTec", "Elevate (Firestone)", "GAF", "Johns Manville", "Versico", "Mule-Hide", "IB Roof Systems", "Sika Sarnafil", "FiberTite", "Other / not sure", "N/A — metal only"];
-function CartPage({ cart, onRemove, onClear, onSubmit, busy, user, forCustomer = null, needsCustomer = false }) {
+const MEMBRANE_MFRS = ["Carlisle SynTec", "Elevate (Firestone)", "GAF", "Johns Manville", "Versico", "Mule-Hide", "IB Roof Systems", "Sika Sarnafil", "FiberTite", "Tremco Duralast", "Other / not sure", "N/A — metal only"];
+// Same list minus "metal only" — offered on TPO/PVC parts in the custom builder.
+const BUILDER_MFRS = MEMBRANE_MFRS.filter((m) => !m.startsWith("N/A"));
+function CartPage({ cart, onRemove, onClear, onSubmit, busy, user, forCustomer = null, needsCustomer = false, onQty = null, onEdit = null }) {
   const [meta, setMeta] = useState({ req_type: "quote", job_name: "", po_number: "", needed_by: "", membrane_mfr: "", metal_color: "", notes: "" });
   const subtotal = cart.reduce((s, i) => s + (i.line_total || 0), 0);
   const hasByRequest = cart.some((i) => i.line_total == null);
@@ -1219,10 +1403,18 @@ function CartPage({ cart, onRemove, onClear, onSubmit, busy, user, forCustomer =
             {cart.map((i) => (
               <tr key={i.key}>
                 <td><b>{i.sku}</b><br /><small>{i.description}</small></td>
-                <td style={{ whiteSpace: "nowrap" }}>{i.qty} {i.unit === "lf" ? "LF" : i.unit === "pc" ? "pcs" : "EA"}</td>
+                <td style={{ whiteSpace: "nowrap" }}>
+                  {onQty
+                    ? <input type="number" min="1" value={i.qty} style={{ width: 62, padding: "5px 6px" }}
+                        onChange={(e) => { const n = Math.max(1, parseInt(e.target.value) || 1); onQty(i.key, n); }} />
+                    : i.qty}{" "}{i.unit === "lf" ? "LF" : i.unit === "pc" ? "pcs" : "EA"}
+                </td>
                 <td>{fmtQ(i.unit_price)}</td>
                 <td>{fmtQ(i.line_total)}</td>
-                <td><button className="btn btn-d btn-sm" onClick={() => onRemove(i.key)}>{IC.trash}</button></td>
+                <td style={{ whiteSpace: "nowrap" }}>
+                  {onEdit && i.kind === "custom" && <button className="btn btn-o btn-sm" title="Edit sizes / material in the builder" style={{ marginRight: 6 }} onClick={() => onEdit(i)}>✏️</button>}
+                  <button className="btn btn-d btn-sm" onClick={() => onRemove(i.key)}>{IC.trash}</button>
+                </td>
               </tr>
             ))}
             <tr><td colSpan="3" style={{ textAlign: "right", fontWeight: 700 }}>Estimated Subtotal</td><td style={{ fontWeight: 800 }}>{fmt(subtotal)}</td><td></td></tr>
@@ -1357,15 +1549,15 @@ function RequestDetail({ req, items, msgs, role, contractor, user, onBack, onSen
                   {i.item_kind === "custom" && i.detail?.params && (() => {
                     const dt = typeById(i.detail.flashing_type);
                     const dSheet = (dt.kind || "sheet") === "sheet";
-                    const dxf = role === "admin" && dSheet ? partDXF(i.detail.flashing_type, i.detail.params) : null;
+                    const dxf = role === "admin" && dSheet && !dt.outlet ? partDXF(i.detail.flashing_type, i.detail.params) : null;
                     return (
                     <tr><td colSpan="4" style={{ background: "#f8fafc" }}>
                       <div className="preview3d" style={{ maxWidth: 420 }}>
                         {dt.pan
                           ? <Pan3D p={i.detail.params} height={170} />
-                          : dSheet
-                          ? <Flashing3D points={dt.points(i.detail.params)} lengthFt={i.detail.piece_length_ft} materialCode={i.detail.material_code} height={170} />
-                          : <SinglePly3D geo={dt.geometry(i.detail.params)} materialCode={i.detail.material_code} split={!!i.detail.params.split} height={170} />}
+                          : (dt.outlet || !dSheet)
+                          ? <SinglePly3D geo={dt.geometry(i.detail.params)} materialCode={i.detail.material_code} split={!!i.detail.params.split} height={170} />
+                          : <Flashing3D points={dt.points(i.detail.params)} lengthFt={i.detail.piece_length_ft} materialCode={i.detail.material_code} height={170} letters={dt.letters ? dt.letters(i.detail.params) : null} />}
                       </div>
                       {dxf && (
                         <button className="btn btn-o btn-sm" style={{ marginTop: 8 }}
@@ -1791,6 +1983,97 @@ function UserForm({ user, meId, onClose, onSave, onDelete, onCreate }) {
   );
 }
 
+// ─── ADMIN: PRICING (category %, builder %, per-inch stretch rates) ──────────
+const PCT_OPTIONS = (() => { const a = []; for (let v = -50; v <= 100; v += 5) a.push(v); return a; })();
+const pctLabel = (v) => (v === 0 ? "No change" : v > 0 ? `+${v}% increase` : `${v}% discount`);
+// Metal-builder materials whose $/inch stretch-out rate the admin can set.
+const STRETCH_MATERIALS = [
+  { code: "G26", label: "Galvanized 26ga" }, { code: "G24", label: "Galvanized 24ga" }, { code: "G22", label: "Galvanized 22ga" },
+  { code: "B26", label: "Bonderized 26ga" }, { code: "B24", label: "Bonderized 24ga" }, { code: "B22", label: "Bonderized 22ga" },
+  { code: "KYN24", label: "Kynar 24ga" }, { code: "KYN22", label: "Kynar 22ga" },
+  { code: "SS24", label: "Stainless 24ga" }, { code: "SS22", label: "Stainless 22ga" },
+  { code: "CU16", label: "Copper 16oz (~24ga)" }, { code: "CU20", label: "Copper 20oz (~22ga)" },
+  { code: "TPOC", label: "TPO-Clad Metal" }, { code: "PVCC", label: "PVC-Clad Metal" },
+];
+function AdminPricing({ products, onSave }) {
+  const cats = useMemo(() => [...new Set(products.map((p) => p.category))].sort(), [products]);
+  // Seeded from the LIVE pricing (defaults + whatever was last saved).
+  const [catPct, setCatPct] = useState(() => ({ ...PRICING.catPct }));
+  const [builderPct, setBuilderPct] = useState(PRICING.builderPct || 0);
+  const [clipEach, setClipEach] = useState(PRICING.clipEach);
+  const [stretch, setStretch] = useState(() => {
+    const o = {}; for (const m of STRETCH_MATERIALS) o[m.code] = PRICING.stretch[m.code] ?? ""; return o;
+  });
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    setBusy(true);
+    const st = {}; for (const m of STRETCH_MATERIALS) { const v = stretch[m.code]; st[m.code] = v === "" || v == null ? null : Math.max(0, parseFloat(v) || 0) || null; }
+    await onSave({ catPct, builderPct: parseFloat(builderPct) || 0, clipEach: Math.max(0, parseFloat(clipEach) || 0), stretch: st });
+    setBusy(false);
+  };
+  return (
+    <div>
+      <div className="g2" style={{ alignItems: "start" }}>
+        <div className="card">
+          <b style={{ display: "block", marginBottom: 4 }}>Catalog — % by category</b>
+          <div style={{ fontSize: 12, color: "var(--mut)", marginBottom: 12 }}>Adjusts every part in the category off its list price. Customers see the adjusted price; their account discount still applies on top.</div>
+          <table><tbody>
+            {cats.map((c) => (
+              <tr key={c}>
+                <td style={{ fontWeight: 600 }}>{c}</td>
+                <td style={{ width: 190 }}>
+                  <select value={catPct[c] ?? 0} onChange={(e) => setCatPct({ ...catPct, [c]: parseInt(e.target.value) })}>
+                    {PCT_OPTIONS.map((v) => <option key={v} value={v}>{pctLabel(v)}</option>)}
+                  </select>
+                </td>
+              </tr>
+            ))}
+            {cats.length === 0 && <tr><td style={{ color: "var(--mut)" }}>Catalog not loaded yet.</td></tr>}
+          </tbody></table>
+        </div>
+        <div>
+          <div className="card" style={{ marginBottom: 14 }}>
+            <b style={{ display: "block", marginBottom: 4 }}>Custom Flashing Builder — %</b>
+            <div style={{ fontSize: 12, color: "var(--mut)", marginBottom: 10 }}>Applies to the flashing builder's each-priced parts: membrane boots &amp; wraps, scuppers, box/pan caps and gutter drop outlets. Metal profiles are priced by the per-inch rates instead.</div>
+            <select value={builderPct} onChange={(e) => setBuilderPct(parseInt(e.target.value))}>
+              {PCT_OPTIONS.map((v) => <option key={v} value={v}>{pctLabel(v)}</option>)}
+            </select>
+          </div>
+          <div className="card">
+            <b style={{ display: "block", marginBottom: 4 }}>Box Gutter Clips</b>
+            <div style={{ fontSize: 12, color: "var(--mut)", marginBottom: 10 }}>$ per hanging clip — 4 clips per 10' gutter section when "with clips" is selected.</div>
+            <input type="number" min="0" step="0.25" value={clipEach} onChange={(e) => setClipEach(e.target.value)} style={{ maxWidth: 140 }} />
+          </div>
+        </div>
+      </div>
+      <div className="card" style={{ marginTop: 14 }}>
+        <b style={{ display: "block", marginBottom: 4 }}>Custom Metal Builder — $ per inch of stretch-out</b>
+        <div style={{ fontSize: 12, color: "var(--mut)", marginBottom: 12 }}>
+          Final customer price per inch of stretch-out on a <b>10' piece</b>, per material. Example: coping at 3" face + 6" wall + 3" back + ½" kick + ½" hem = 13" of stretch — at $4.25/in the 10' piece prices at 13 × $4.25 = $55.25. Leave a rate <b>blank</b> to price that metal "on request" (no number shown).
+        </div>
+        <div style={{ overflowX: "auto" }}>
+          <table><thead><tr><th>Material</th><th style={{ width: 170 }}>$ / inch (10' piece)</th><th>Priced as</th></tr></thead>
+            <tbody>
+              {STRETCH_MATERIALS.map((m) => (
+                <tr key={m.code}>
+                  <td style={{ fontWeight: 600 }}>{m.label}</td>
+                  <td><input type="number" min="0" step="0.05" value={stretch[m.code]} placeholder="on request"
+                        onChange={(e) => setStretch({ ...stretch, [m.code]: e.target.value })} style={{ padding: "6px 8px" }} /></td>
+                  <td style={{ color: "var(--mut)", fontSize: 12 }}>{stretch[m.code] === "" || stretch[m.code] == null ? "Quoted on request" : `${fmt(parseFloat(stretch[m.code]) || 0)} × stretch-out inches`}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div className="row" style={{ marginTop: 14 }}>
+        <button className="btn btn-p" disabled={busy} onClick={save}>{IC.send}&nbsp;{busy ? "Saving…" : "Save Pricing"}</button>
+        <span style={{ fontSize: 12, color: "var(--mut)", alignSelf: "center" }}>Takes effect immediately for every customer, distributor and the guest builder.</span>
+      </div>
+    </div>
+  );
+}
+
 // ─── DISTRIBUTOR: MY CUSTOMERS + SIGN-UP PINS ────────────────
 // A distributor only ever sees customers linked to them — either assigned by a
 // Flash-Tech admin, created here, or signed up with one of their PINs.
@@ -2017,6 +2300,8 @@ export default function App() {
   const [contractors, setContractors] = useState([]);
   const [staff, setStaff] = useState([]); // admin + distributor logins (managed on the Team page)
   const [invites, setInvites] = useState([]); // distributor's customer sign-up PINs
+  const [pricing, setPricing] = useState(null); // admin-saved pricing overrides (also applied into catalog.js)
+  const [editSeed, setEditSeed] = useState({ item: null, nonce: 0 }); // cart line being edited in the builder
   const [actingId, setActingId] = useState(() => { try { return localStorage.getItem("ftp_acting") || ""; } catch { return ""; } }); // distributor: which customer they're working for
   const [menuOpen, setMenuOpen] = useState(false); // mobile slide-in nav drawer
   const [reqFilter, setReqFilter] = useState("all"); // seeds the Requests list filter (set by dashboard tiles)
@@ -2067,7 +2352,11 @@ export default function App() {
     if (!sess) return;
     try {
       const d = await api("loadAll");
-      if (d.products?.length) setProducts(d.products);
+      // Admin pricing first (per-inch stretch rates, builder %, category %) so the
+      // catalog prices below and every builder price use the saved numbers.
+      applyPricing(d.pricing);
+      setPricing(d.pricing || {});
+      if (d.products?.length) setProducts(d.products.map((p) => ({ ...p, price: categoryAdjust(p.price, p.category) })));
       setRequests(d.requests || []);
       setItems(d.items || []);
       setMsgs(d.messages || []);
@@ -2086,6 +2375,15 @@ export default function App() {
   }, []);
 
   useEffect(() => { if (session) loadAll(session); }, [session, loadAll]);
+  // Guest builder: pull the catalog + saved pricing so guest prices match the real ones.
+  useEffect(() => {
+    if (!guest || session) return;
+    api("products").then((d) => {
+      applyPricing(d.pricing);
+      setPricing(d.pricing || {});
+      if (d.products?.length) setProducts(d.products.map((p) => ({ ...p, price: categoryAdjust(p.price, p.category) })));
+    }).catch(() => {});
+  }, [guest, session]);
   // Auto-refresh so the admin sees new requests / replies come in
   useEffect(() => {
     if (!session) return;
@@ -2148,18 +2446,31 @@ export default function App() {
     setCart((c) => [...c, { key: uid(), kind: "product", sku: p.sku, description: p.description, unit: p.unit, qty, unit_price: up, line_total: Math.round(up * qty * 100) / 100 }]);
     flash(`Added ${qty} ${p.unit === "lf" ? "LF" : "x"} ${p.sku}`);
   };
-  const addCustom = (cf, pieces) => {
-    const isSheet = (typeById(cf.flashing_type).kind || "sheet") === "sheet";
+  const addCustom = (cf, pieces, replaceKey = null) => {
+    const t = typeById(cf.flashing_type);
+    const isSheet = (t.kind || "sheet") === "sheet";
+    const eachLike = t.pan || t.outlet || !isSheet;
     const description = cf.description || (isSheet
       ? customDescription(cf.flashing_type, cf.material_code, cf.params, cf.piece_length_ft, cf.girth)
       : membraneDescription(cf.flashing_type, cf.material_code, cf.params, !!cf.params.split));
     const up = cf.price_per_piece == null ? null : applyDisc(cf.price_per_piece);
-    setCart((c) => [...c, {
-      key: uid(), kind: "custom", sku: cf.part_number, description,
-      unit: isSheet ? "pc" : "ea", qty: pieces, unit_price: up, line_total: up == null ? null : Math.round(up * pieces * 100) / 100,
+    const line = {
+      key: replaceKey || uid(), kind: "custom", sku: cf.part_number, description,
+      unit: eachLike ? "ea" : "pc", qty: pieces, unit_price: up, line_total: up == null ? null : Math.round(up * pieces * 100) / 100,
       detail: { flashing_type: cf.flashing_type, material_code: cf.material_code, params: cf.params, girth: cf.girth, piece_length_ft: cf.piece_length_ft },
-    }]);
-    flash(`Added ${pieces} ${isSheet ? "pcs" : "ea"} ${cf.part_number}`);
+    };
+    setCart((c) => (replaceKey && c.some((i) => i.key === replaceKey)
+      ? c.map((i) => (i.key === replaceKey ? line : i))
+      : [...c, line]));
+    flash(replaceKey ? `Updated ${cf.part_number} in your cart` : `Added ${pieces} ${eachLike ? "ea" : "pcs"} ${cf.part_number}`);
+  };
+  // Cart line edits: change a quantity in place, or send a custom item back to the builder.
+  const setCartQty = (key, n) => setCart((c) => c.map((i) => (i.key === key
+    ? { ...i, qty: n, line_total: i.unit_price == null ? null : Math.round(i.unit_price * n * 100) / 100 }
+    : i)));
+  const editCartItem = (item) => {
+    setEditSeed((s) => ({ item, nonce: s.nonce + 1 }));
+    setSelReq(null); setPage("builder");
   };
   const savePart = async (cf) => {
     try { const { part } = await api("savePart", { part: cf }); if (part) setParts((p) => [part, ...p]); }
@@ -2372,6 +2683,15 @@ export default function App() {
     flash("Team member deleted.");
   };
 
+  // ── admin: save pricing (category %, builder %, per-inch stretch rates) ──
+  const savePricing = async (next) => {
+    try { await api("savePricing", { pricing: next }); }
+    catch (e) { alert("Could not save pricing: " + e.message); return false; }
+    await loadAll(session); // re-applies rates + re-prices the catalog
+    flash("Pricing saved — new rates are live for everyone.");
+    return true;
+  };
+
   // ── notifications ──
   const seenKey = session ? `ftp_seen_${session.id}` : "";
   const getSeen = () => { try { return JSON.parse(localStorage.getItem(seenKey)) || {}; } catch { return {}; } };
@@ -2431,7 +2751,7 @@ export default function App() {
   if (mustChangePw) return (<><style>{CSS}</style>{maintBanner}<ForcePasswordChange user={session} onDone={(u) => { setSession(u); setMustChangePw(false); setPage(u.role === "admin" || u.role === "distributor" ? "dashboard" : "shop"); }} /></>);
 
   const nav = isAdmin
-    ? [["dashboard", "Dashboard", IC.home], ["requests", "Requests", IC.list], ["customers", "Customers", IC.users], ["team", "Team", IC.shield], ["catalog", "Catalog", IC.box], ["builder", "Custom Builder", IC.wrench], ["downloads", "Downloads", IC.download]]
+    ? [["dashboard", "Dashboard", IC.home], ["requests", "Requests", IC.list], ["customers", "Customers", IC.users], ["team", "Team", IC.shield], ["catalog", "Catalog", IC.box], ["pricing", "Pricing", IC.tag], ["builder", "Custom Builder", IC.wrench], ["downloads", "Downloads", IC.download]]
     : isDist
     ? [["dashboard", "Dashboard", IC.home], ["requests", "Customer Requests", IC.list], ["customers", "My Customers", IC.users], ["catalog", "Parts Catalog", IC.box], ["builder", "Custom Flashing", IC.wrench], ["downloads", "Downloads", IC.download], ["cart", "Cart / Send Request", IC.cart]]
     : [["shop", "Home", IC.home], ["catalog", "Parts Catalog", IC.box], ["builder", "Custom Flashing", IC.wrench], ["downloads", "Downloads", IC.download], ["cart", "Cart / Send Request", IC.cart], ["requests", "My Requests", IC.list], ["parts", "My Saved Parts", IC.bookmark]];
@@ -2443,6 +2763,7 @@ export default function App() {
       isAdmin ? "Click a request to review and respond" : isDist ? "Quotes and orders from your customers" : "Track your quotes and orders"],
     customers: [isDist ? "My Customers" : "Customers", isDist ? "Your accounts — discounts, logins and sign-up PINs" : "Contractor accounts on the portal"],
     team: ["Team", "Staff logins with admin access — add, edit, reset or remove"],
+    pricing: ["Pricing", "Category % adjustments, builder %, and per-inch metal rates"],
     downloads: ["Shop Drawings", "Download submittal PDFs for your Flash-Tech products"],
     catalog: [isAdmin ? "Parts Catalog" : "Parts Catalog", isAdmin ? "Full price list — search and filter by category" : "Drip edge, coping & accessories — add by linear foot or each"],
     builder: ["Custom Flashing Builder", "Dimensions in, 3D model + price out"],
@@ -2505,14 +2826,15 @@ export default function App() {
           {page === "customers" && isAdmin && <AdminCustomers contractors={contractors} requests={requests} onSave={saveContractor} onDelete={deleteContractor} onCreate={createContractor} onNotify={notifyContractor} distributors={staff.filter((u) => u.role === "distributor")} />}
           {page === "customers" && isDist && <DistributorCustomers me={session} contractors={contractors} requests={requests} invites={invites} onSave={saveContractor} onCreate={createContractor} onNotify={notifyContractor} onGenPin={genPin} onRevokePin={revokePin} />}
           {page === "team" && isAdmin && <AdminUsers users={staff} meId={session.id} onCreate={createUser} onSave={saveUser} onDelete={deleteUser} />}
+          {page === "pricing" && isAdmin && <AdminPricing key={JSON.stringify(pricing || {})} products={products} onSave={savePricing} />}
           {page === "downloads" && <DownloadsPage />}
           {page === "shop" && !isAdmin && !isDist && <ShopPage products={products} discPct={discPct} onPickCategory={openCategory} onBuilder={openBuilder} />}
           {page === "catalog" && isAdmin && <CatalogPage products={products} readOnly />}
           {page === "catalog" && !isAdmin && <CatalogPage products={products} onAdd={isDist && !actingCustomer ? null : addProduct} readOnly={isDist && !actingCustomer} disc={applyDisc} discPct={discPct} seedCat={catSeed.cat} seedNonce={catSeed.nonce} />}
           {page === "builder" && isAdmin && <BuilderPage reference guest={false} onAddToCart={() => {}} onSavePart={() => {}} />}
-          {page === "builder" && !isAdmin && <BuilderPage guest={false} reference={isDist && !actingCustomer} onAddToCart={addCustom} onSavePart={isDist ? () => {} : savePart} disc={applyDisc} discPct={discPct} detectInfo={camResult} detectNonce={camNonce} seedType={bSeed.type} seedNonce={bSeed.nonce} />}
-          {page === "cart" && !isAdmin && <CartPage cart={cart} onRemove={(k) => setCart((c) => c.filter((i) => i.key !== k))} onClear={() => setCart([])} onSubmit={submitRequest} busy={busy} user={isDist ? actingCustomer : session} forCustomer={isDist ? actingCustomer : null} needsCustomer={isDist && !actingCustomer} />}
-          {page === "parts" && !isAdmin && !isDist && <MyPartsPage parts={parts} onAdd={addCustom} onDel={delPart} disc={applyDisc} discPct={discPct} />}
+          {page === "builder" && !isAdmin && <BuilderPage guest={false} reference={isDist && !actingCustomer} onAddToCart={addCustom} onSavePart={isDist ? () => {} : savePart} disc={applyDisc} discPct={discPct} detectInfo={camResult} detectNonce={camNonce} seedType={bSeed.type} seedNonce={bSeed.nonce} editItem={editSeed.item} editNonce={editSeed.nonce} />}
+          {page === "cart" && !isAdmin && <CartPage cart={cart} onRemove={(k) => setCart((c) => c.filter((i) => i.key !== k))} onClear={() => setCart([])} onSubmit={submitRequest} busy={busy} user={isDist ? actingCustomer : session} forCustomer={isDist ? actingCustomer : null} needsCustomer={isDist && !actingCustomer} onQty={setCartQty} onEdit={editCartItem} />}
+          {page === "parts" && !isAdmin && !isDist && <MyPartsPage parts={parts} onAdd={addCustom} onDel={delPart} disc={applyDisc} discPct={discPct} user={session} />}
           {page === "requests" && (curReq ? (
             <RequestDetail req={curReq} items={items} msgs={msgs} role={role}
               contractor={isAdmin || isDist ? contractorsById[curReq.contractor_id] : null} user={session}

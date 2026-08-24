@@ -262,13 +262,18 @@ export const productImage = (p) => {
 export const MATERIALS = [
   { code: "G26", name: "Galvanized 26ga", rate: 0.26, hue: 210, sat: 8, lum: 62 },
   { code: "G24", name: "Galvanized 24ga", rate: 0.32, hue: 210, sat: 8, lum: 60 },
+  { code: "G22", name: "Galvanized 22ga", rate: 0.36, hue: 210, sat: 8, lum: 58 },
   { code: "B26", name: "Bonderized 26ga", rate: 0.28, hue: 35, sat: 7, lum: 46 },
   { code: "B24", name: "Bonderized 24ga", rate: 0.34, hue: 35, sat: 7, lum: 44 },
+  { code: "B22", name: "Bonderized 22ga", rate: 0.38, hue: 35, sat: 7, lum: 42 },
   { code: "A32", name: 'Aluminum .032"', rate: 0.36, hue: 215, sat: 4, lum: 72 },
   { code: "A40", name: 'Aluminum .040"', rate: 0.46, hue: 215, sat: 4, lum: 70 },
   // Bare-metal rates anchored to Galv 24ga sheet cost ($40 / 120×48): stainless = 2.5× ($100), copper = 8.75× ($350).
-  { code: "CU16", name: "Copper 16oz", rate: 2.80, hue: 22, sat: 60, lum: 48 },
+  // Copper is sold by weight: 16oz ≈ 24ga thickness, 20oz ≈ 22ga.
+  { code: "CU16", name: "Copper 16oz (~24ga)", rate: 2.80, hue: 22, sat: 60, lum: 48 },
+  { code: "CU20", name: "Copper 20oz (~22ga)", rate: 3.40, hue: 22, sat: 62, lum: 45 },
   { code: "SS24", name: "Stainless 24ga", rate: 0.80, hue: 210, sat: 6, lum: 74 },
+  { code: "SS22", name: "Stainless 22ga", rate: 1.00, hue: 210, sat: 6, lum: 72 },
 ];
 
 // ─── Single-ply membrane: type (TPO / PVC), color, thickness ───
@@ -331,6 +336,19 @@ export const anyMat = (c) => MATERIALS.find((m) => m.code === c) || membraneStyl
 export const matByCode = anyMat;
 
 const rad = (deg) => (deg * Math.PI) / 180;
+
+// ─── Gutter drop outlet sizes (square or round) — referenced by the builder type below ───
+export const DROP_OUTLET_SIZES = [
+  { code: "2x2", label: '2" × 2" square', shape: "square", w: 2, d: 2 },
+  { code: "2x3", label: '2" × 3" square', shape: "square", w: 2, d: 3 },
+  { code: "2x4", label: '2" × 4" square', shape: "square", w: 2, d: 4 },
+  { code: "3x3", label: '3" × 3" square', shape: "square", w: 3, d: 3 },
+  { code: "3x4", label: '3" × 4" square', shape: "square", w: 3, d: 4 },
+  { code: "4x6", label: '4" × 6" square', shape: "square", w: 4, d: 6 },
+  { code: "R3", label: '3" round', shape: "round", dia: 3 },
+  { code: "R4", label: '4" round', shape: "round", dia: 4 },
+];
+export const outletSize = (code) => DROP_OUTLET_SIZES.find((s) => s.code === code) || DROP_OUTLET_SIZES[3];
 
 // ─── Flashing profile types ───
 // Each type lists its dimension fields (inches / degrees) and a points()
@@ -432,6 +450,75 @@ export const FLASHING_TYPES = [
     dims: (p) => `${p.width}" wall, ${p.front}"/${p.back}" faces, ${p.kick ?? 0.5}" kick-out @ ${p.kickAngle ?? 45}°${p.edge === "hemkick" ? ", hemmed" : ""}` +
       (p.cleat === "segmented" ? ", segmented cleats" : p.cleat === "none" ? "" : ", full-length cleat") +
       (p.splice === "no" ? "" : ", splice plates"),
+  },
+  {
+    id: "boxGutter",
+    code: "BG",
+    name: "Box Gutter (10' sections)",
+    gutter: true,       // clips add-on + fixed 10' sections
+    fixedLen: 10,
+    fields: [
+      { key: "back", label: 'A — Back Height (in)', def: 8, min: 3, max: 20, step: 0.25 },
+      { key: "bottom", label: 'B — Bottom Width (in)', def: 6, min: 3, max: 24, step: 0.25 },
+      { key: "front", label: 'C — Front Height (in)', def: 6, min: 2, max: 20, step: 0.25 },
+      { key: "lip", label: 'D — Front Top Return (in)', def: 1, min: 0, max: 4, step: 0.25 },
+      { key: "backFlange", label: 'E — Back Top Flange (in)', def: 1, min: 0, max: 6, step: 0.25 },
+      { key: "clips", label: "Hanging Clips", type: "choice", def: "clips", options: [
+        { value: "clips", label: 'With clips (every 30" — 4 per section)' },
+        { value: "none", label: "No clips" },
+      ] },
+    ],
+    // Cross-section: E back flange (out over the wall), A back, B bottom, C front, D top return (in).
+    points: (p) => {
+      const A = p.back, B = p.bottom, C = p.front, D = p.lip ?? 0, E = p.backFlange ?? 0;
+      const pts = [];
+      if (E > 0) pts.push([B + E, 0]);
+      pts.push([B, 0], [B, A], [0, A], [0, A - C]);
+      if (D > 0) pts.push([D, A - C]);
+      return pts;
+    },
+    letters: (p) => {
+      const arr = [];
+      if ((p.backFlange ?? 0) > 0) arr.push("E");
+      arr.push("A", "B", "C");
+      if ((p.lip ?? 0) > 0) arr.push("D");
+      return arr;
+    },
+    dims: (p) => `${p.back}" back (A) × ${p.bottom}" bottom (B) × ${p.front}" front (C)` +
+      ((p.lip ?? 0) > 0 ? `, ${p.lip}" front return (D)` : "") +
+      ((p.backFlange ?? 0) > 0 ? `, ${p.backFlange}" back flange (E)` : "") +
+      (p.clips === "clips" ? ", with hanging clips" : ", no clips"),
+  },
+  {
+    id: "downspout",
+    code: "DS",
+    name: "Square Downspout",
+    fields: [
+      { key: "w", label: 'A — Width (in)', def: 3, min: 1.5, max: 8, step: 0.25 },
+      { key: "d", label: 'B — Depth (in)', def: 4, min: 1.5, max: 8, step: 0.25 },
+    ],
+    // Closed rectangular tube with a lock seam (drawn with a hairline seam gap).
+    points: (p) => [[0, 0], [p.w, 0], [p.w, p.d], [0, p.d], [0, 0.35]],
+    letters: () => ["A", "B", "A", "B"],
+    dims: (p) => `${p.w}" × ${p.d}" tube (A × B), lock seam`,
+  },
+  {
+    id: "dropOutlet",
+    code: "DO",
+    name: "Gutter Drop Outlet",
+    outlet: true, // priced EACH from the size table (metal, drops into a box gutter)
+    fields: [
+      { key: "size", label: "Outlet Size", type: "choice", def: "3x3", options: DROP_OUTLET_SIZES.map((s) => ({ value: s.code, label: s.label })) },
+      { key: "drop", label: "Drop / Tube Length (in)", def: 4, min: 2, max: 12, step: 0.5 },
+      { key: "flange", label: "Flange Width (in)", def: 1.5, min: 1, max: 4, step: 0.25 },
+    ],
+    geometry: (p) => {
+      const s = outletSize(p.size);
+      return s.shape === "square"
+        ? { shape: "square", half: Math.max(s.w, s.d) / 2, height: p.drop, flange: p.flange, tilt: 0 }
+        : { shape: "cylinder", botR: s.dia / 2, topR: s.dia / 2, height: p.drop, flangeR: s.dia / 2 + p.flange };
+    },
+    dims: (p) => `${outletSize(p.size).label}, ${p.drop}" drop, ${p.flange}" flange`,
   },
   {
     id: "gravelStop",
@@ -593,7 +680,7 @@ export const SCUPPER_TIERS = [
 export const scupperSides = (w, h) => Math.round(2 * (w + h) * 100) / 100;
 export const scupperTier = (sides) => SCUPPER_TIERS.find((t) => sides <= t.max) || SCUPPER_TIERS[SCUPPER_TIERS.length - 1];
 const isPVCmat = (matCode) => (anyMat(matCode).typeName || "TPO").startsWith("PVC");
-export const scupperPrice = (geo, matCode) => { const t = scupperTier(scupperSides(geo.w, geo.h)); return Math.round((isPVCmat(matCode) ? t.pvc : t.tpo) * BUILDER_MARKUP * 100) / 100; };
+export const scupperPrice = (geo, matCode) => { const t = scupperTier(scupperSides(geo.w, geo.h)); return Math.round((isPVCmat(matCode) ? t.pvc : t.tpo) * BUILDER_MARKUP * builderMult() * 100) / 100; };
 export const scupperPartNumber = (matCode, geo) => scupperTier(scupperSides(geo.w, geo.h)).sku + (isPVCmat(matCode) ? "PVC" : "TPO");
 
 // ─── Geometry & pricing ───
@@ -636,24 +723,61 @@ const MIN_PIECE = 14; // shop minimum per piece
 // membrane flashings, scuppers, box/pan caps). 1.20 = +20%. Change this one number to adjust.
 export const BUILDER_MARKUP = 1.20;
 
-// Final customer price per INCH of stretch-out on a 10' piece, keyed by base material
-// (color suffix ignored, e.g. KYN24-RW → KYN24). null = quoted on request (copper).
-// Markup is baked into these numbers. Materials not listed fall back to the rate × markup model.
-export const STRETCH_RATE = {
-  G26: 3.70,   // Galvanized 26ga
-  G24: 4.25,   // Galvanized 24ga
-  B26: 3.70,   // Bonderized 26ga — same as galvanized
-  B24: 4.25,   // Bonderized 24ga — same as galvanized
-  KYN24: 5.50, // Kynar 24ga (painted)
-  KYN22: 6.25, // Kynar 22ga (painted)
-  SS24: 7.25,  // Stainless
-  CU16: null,  // Copper — priced on request, no number shown
+// ─── Runtime pricing — admin-editable on the Pricing page, stored in the DB ───
+// The numbers below are the DEFAULTS; applyPricing() overlays whatever the admin
+// has saved, so price changes never need a code deploy.
+//   stretch    — final customer $ per INCH of stretch-out on a 10' piece, keyed by
+//                base material (color suffix ignored, KYN24-RW → KYN24). Markup is
+//                baked in. null = quoted on request (copper). Materials not listed
+//                fall back to the legacy rate × markup model.
+//   catPct     — % adjustment per catalog category (e.g. { Drains: 10 } = +10%).
+//   builderPct — % adjustment on flashing-builder prices (membrane boots/wraps,
+//                scuppers, box caps, drop outlets). Metal-builder profiles use the
+//                per-inch stretch rates instead.
+//   clipEach   — $ per box-gutter hanging clip (4 per 10' section).
+export const PRICING = {
+  stretch: {
+    G26: 3.70,   // Galvanized 26ga
+    G24: 4.25,   // Galvanized 24ga
+    G22: 4.75,   // Galvanized 22ga
+    B26: 3.70,   // Bonderized 26ga — same as galvanized
+    B24: 4.25,   // Bonderized 24ga
+    B22: 4.75,   // Bonderized 22ga
+    KYN24: 5.50, // Kynar 24ga (painted)
+    KYN22: 6.25, // Kynar 22ga (painted)
+    SS24: 7.25,  // Stainless 24ga
+    SS22: 8.25,  // Stainless 22ga
+    CU16: null,  // Copper 16oz — priced on request unless the admin sets a rate
+    CU20: null,  // Copper 20oz — priced on request unless the admin sets a rate
+    TPOC: 5.30,  // TPO-clad metal
+    PVCC: 5.55,  // PVC-clad metal
+  },
+  catPct: {},
+  builderPct: 0,
+  clipEach: 6.00,
 };
+// Overlay admin-saved pricing (from the server) onto the defaults.
+export const applyPricing = (p) => {
+  if (!p || typeof p !== "object") return;
+  if (p.stretch && typeof p.stretch === "object") {
+    for (const k of Object.keys(PRICING.stretch)) {
+      if (k in p.stretch) PRICING.stretch[k] = p.stretch[k] === null || p.stretch[k] === "" ? null : (parseFloat(p.stretch[k]) || null);
+    }
+  }
+  if (p.catPct && typeof p.catPct === "object") PRICING.catPct = { ...p.catPct };
+  if (p.builderPct != null && !isNaN(parseFloat(p.builderPct))) PRICING.builderPct = parseFloat(p.builderPct);
+  if (p.clipEach != null && !isNaN(parseFloat(p.clipEach))) PRICING.clipEach = parseFloat(p.clipEach);
+};
+// % multipliers derived from the runtime pricing
+const builderMult = () => 1 + (PRICING.builderPct || 0) / 100;
+export const categoryPct = (cat) => parseFloat(PRICING.catPct?.[cat]) || 0;
+export const categoryAdjust = (price, cat) => Math.round(price * (1 + categoryPct(cat) / 100) * 100) / 100;
+
 export const piecePrice = (girth, bends, lengthFt, matCode) => {
   const base = String(matCode || "").split("-")[0];
-  if (Object.prototype.hasOwnProperty.call(STRETCH_RATE, base)) {
-    const r = STRETCH_RATE[base];
-    if (r == null) return null; // copper — no price
+  if (Object.prototype.hasOwnProperty.call(PRICING.stretch, base)) {
+    const r = PRICING.stretch[base];
+    if (r == null) return null; // no rate set — priced on request (copper)
     const raw = girth * r * (lengthFt / 10) + bends * BEND_CHARGE;
     return Math.round(Math.max(MIN_PIECE, raw) * 100) / 100; // markup already in the rate
   }
@@ -666,16 +790,39 @@ export const piecePrice = (girth, bends, lengthFt, matCode) => {
 // Full-length cleat is priced like a galvanized-26ga piece at ONE-THIRD the coping's
 // stretch-out (per Flash-Tech). Segmented cleats and splice plates use the
 // tunable factors below.
-const CLEAT_G26_RATE = 3.70;      // galvanized 26ga stretch rate ($/in stretch on a 10' piece)
 const CLEAT_STRETCH_DIV = 3;      // full-length cleat uses coping stretch-out / this
 const SEG_CLEAT_FACTOR = 0.5;     // segmented cleats ≈ this × a full-length cleat
 const SPLICE_PLATE_EACH = 10.00;  // $ per splice plate, one per coping piece (flat)
 export const copingExtras = (p, girth, lengthFt) => {
   if (!p) return { cleat: 0, splice: 0, total: 0 };
-  const cleatFull = Math.round((Math.max(0, girth) / CLEAT_STRETCH_DIV) * CLEAT_G26_RATE * (lengthFt / 10) * 100) / 100;
+  const cleatRate = PRICING.stretch.G26 ?? 3.70; // cleats are galvanized 26ga — follows the admin rate
+  const cleatFull = Math.round((Math.max(0, girth) / CLEAT_STRETCH_DIV) * cleatRate * (lengthFt / 10) * 100) / 100;
   const cleat = p.cleat === "full" ? cleatFull : p.cleat === "segmented" ? Math.round(cleatFull * SEG_CLEAT_FACTOR * 100) / 100 : 0;
   const splice = p.splice === "no" ? 0 : SPLICE_PLATE_EACH;
   return { cleat, splice, total: Math.round((cleat + splice) * 100) / 100 };
+};
+
+// ─── Box gutter add-ons: hanging clips (one every 30" → 4 per 10' section) ───
+export const gutterExtras = (p) => {
+  const clips = p && p.clips === "clips" ? 4 : 0;
+  const total = Math.round(clips * PRICING.clipEach * 100) / 100;
+  return { clips, each: PRICING.clipEach, total };
+};
+
+// ─── Gutter drop outlets — priced EACH ───
+// Base fabrication estimate (galvanized), scaled by material like the box/pan cap.
+const OUTLET_BASE = { "2x2": 22, "2x3": 24, "2x4": 26, "3x3": 26, "3x4": 29, "4x6": 36, R3: 24, R4: 28 };
+export const outletPrice = (p, matCode) => {
+  const base = String(matCode || "").split("-")[0];
+  if (Object.prototype.hasOwnProperty.call(PRICING.stretch, base) && PRICING.stretch[base] == null) return null; // copper — on request
+  const usd = OUTLET_BASE[p.size] || 26;
+  const mult = (matByCode(matCode).rate || 0.26) / (matByCode("G26").rate || 0.26);
+  return Math.round(Math.max(MIN_PIECE, usd * mult) * BUILDER_MARKUP * builderMult() * 100) / 100;
+};
+export const outletPartNumber = (matCode, p) => `FT-CX-DO-${matCode}-${p.size}`;
+export const outletDescription = (matCode, p) => {
+  const s = outletSize(p.size);
+  return `Custom Gutter Drop Outlet — ${matByCode(matCode).name}, ${s.label}, ${p.drop}" drop tube, ${p.flange}" flange`;
 };
 
 export const customPartNumber = (typeId, matCode, girth) => {
@@ -708,7 +855,7 @@ export const panPrice = (p, matCode) => {
   const blankArea = (L + 2 * S) * (W + 2 * S);
   const usd = PAN_BASE + PAN_AREA * blankArea;
   const mult = (matByCode(matCode).rate || 0.26) / (matByCode("G26").rate || 0.26);
-  return Math.round(Math.max(MIN_PIECE, usd * mult) * BUILDER_MARKUP * 100) / 100;
+  return Math.round(Math.max(MIN_PIECE, usd * mult) * BUILDER_MARKUP * builderMult() * 100) / 100;
 };
 export const panPartNumber = (matCode, p) =>
   `FT-CX-CAP-${matCode}-${Math.round(parseFloat(p.length) || 0)}x${Math.round(parseFloat(p.width) || 0)}x${Math.round(parseFloat(p.height) || 0)}`;
@@ -752,6 +899,7 @@ export const panFlatDXF = (p) => {
 // Pick the right DXF for a saved sheet-metal part (pan flat blank vs linear profile).
 export const partDXF = (flashingType, params) => {
   const t = typeById(flashingType);
+  if (t.outlet) return null; // drop outlets are fabricated tubes, no linear profile
   if (t.pan) return panFlatDXF(params);
   if ((t.kind || "sheet") === "sheet") return profileDXF(t.custom ? customProfilePoints(params.segs || []) : t.points(params));
   return null;
@@ -770,7 +918,7 @@ export const membranePrice = (geo, matCode, split, mil = 60) => {
     raw = MEMBRANE_BASE + geo.botR * 2 * 1.7 + geo.height * 0.9 + (split ? 5 : 0);
   }
   if (geo.tilt) raw += 8; // mitered fabrication surcharge
-  return Math.round(Math.max(MEMBRANE_MIN, raw) * (m.rate || 1) * (MIL_FACTOR[mil] || 1) * BUILDER_MARKUP * 100) / 100;
+  return Math.round(Math.max(MEMBRANE_MIN, raw) * (m.rate || 1) * (MIL_FACTOR[mil] || 1) * BUILDER_MARKUP * builderMult() * 100) / 100;
 };
 export const membranePartNumber = (typeId, matCode, geo, split) => {
   const t = typeById(typeId);
@@ -781,7 +929,8 @@ export const membranePartNumber = (typeId, matCode, geo, split) => {
 export const membraneDescription = (typeId, matCode, params, split) => {
   const t = typeById(typeId);
   const m = anyMat(matCode);
-  return `Custom ${split ? "Split " : ""}${t.name} — ${m.name}, ${t.dims(params)}`;
+  const mfr = params && params.mfr ? `, match ${params.mfr}` : "";
+  return `Custom ${split ? "Split " : ""}${t.name} — ${m.name}, ${t.dims(params)}${mfr}`;
 };
 
 export const defaultParams = (typeId) => {

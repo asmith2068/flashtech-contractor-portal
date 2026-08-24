@@ -24,7 +24,7 @@ const LIGHT = (() => {
   return v.map((a) => a / n);
 })();
 
-export default function Flashing3D({ points, lengthFt = 10, materialCode = "G26", height = 280, showDims = true }) {
+export default function Flashing3D({ points, lengthFt = 10, materialCode = "G26", height = 280, showDims = true, letters = null }) {
   if (!points || points.length < 2) return null;
   const mat = matByCode(materialCode);
 
@@ -82,7 +82,7 @@ export default function Flashing3D({ points, lengthFt = 10, materialCode = "G26"
       labels.push(
         <text key={i} x={lx} y={ly} fontSize={fs} fill="var(--ink, #1f2937)" fontWeight="700"
           textAnchor="middle" paintOrder="stroke" stroke="#ffffff" strokeWidth={fs / 4}>
-          {Math.round(len * 100) / 100}&quot;
+          {letters && letters[i] ? `${letters[i]}: ` : ""}{Math.round(len * 100) / 100}&quot;
         </text>
       );
     }

@@ -64,6 +64,17 @@ const pickUserFields = (f = {}) => Object.fromEntries(Object.entries(f).filter((
 
 const err = (code, message) => { const e = new Error(message); e.code = code; throw e; };
 
+// Admin-editable pricing (category %, builder %, per-inch stretch rates) lives in a
+// hidden portal_products row so it needs no schema change. active=false keeps it out
+// of every catalog query; the client overlays it onto its built-in defaults.
+const PRICING_SKU = "__PRICING__";
+async function getPricing() {
+  try {
+    const { data } = await db.from("portal_products").select("description").eq("sku", PRICING_SKU).maybeSingle();
+    return data && data.description ? JSON.parse(data.description) : null;
+  } catch { return null; }
+}
+
 async function sendResetEmail(to, link) {
   const key = process.env.RESEND_API_KEY;
   if (!key) return;
@@ -195,7 +206,7 @@ export default async function handler(req, res) {
       }
       case "products": { // public catalog (guest builder / login screen)
         const { data } = await db.from("portal_products").select("*").eq("active", true).order("category").order("sku");
-        return res.json({ products: data || [] });
+        return res.json({ products: data || [], pricing: await getPricing() });
       }
 
       // ── signed in ───────────────────────────────────────────
@@ -247,7 +258,23 @@ export default async function handler(req, res) {
           const { data } = await db.from("portal_custom_flashings").select("*").eq("contractor_id", a.id).order("created_at", { ascending: false });
           parts = data || [];
         }
-        return res.json({ user: clean(me), products: products || [], requests, items, messages, contractors, staff, parts, invites });
+        return res.json({ user: clean(me), products: products || [], requests, items, messages, contractors, staff, parts, invites, pricing: await getPricing() });
+      }
+
+      // ── admin: pricing (category %, builder %, per-inch stretch rates) ──
+      // Stored as a hidden row in portal_products (sku "__PRICING__", active=false)
+      // so no schema migration is needed; the catalog query filters it out.
+      case "savePricing": {
+        needAdmin();
+        const p = body.pricing;
+        if (!p || typeof p !== "object") return res.status(400).json({ error: "No pricing payload." });
+        const json = JSON.stringify(p);
+        if (json.length > 20000) return res.status(400).json({ error: "Pricing payload too large." });
+        const { error } = await db.from("portal_products").upsert(
+          { sku: PRICING_SKU, category: "_settings", description: json, unit: "ea", price: 0, active: false },
+          { onConflict: "sku" });
+        if (error) return res.status(400).json({ error: error.message });
+        return res.json({ ok: true });
       }
 
       // ── saved custom parts (contractor's own) ───────────────
