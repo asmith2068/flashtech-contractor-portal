@@ -129,16 +129,94 @@ button{margin-bottom:18px;padding:9px 18px;background:#0aa810;color:#fff;border:
 }
 
 // ─── PRINTABLE SHOP DRAWING (from a saved custom part) ───────
+// Dimensioned 2D cross-section for the shop sheet: the flat profile drawn to
+// scale with every segment length called out (1/16" fractions) and the included
+// angle marked with an arc at every bend — a real fabrication drawing. All
+// values are derived from the same point list that drives pricing and the DXF,
+// so what's printed is exactly what gets braked.
+function ProfileDrawing({ points, letters = null, height = 400 }) {
+  if (!points || points.length < 2) return null;
+  const xs = points.map((p) => p[0]), ys = points.map((p) => p[1]);
+  const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+  const span = Math.max(maxX - minX, maxY - minY, 1);
+  const pad = span * 0.28 + 1.4;
+  const vb = `${minX - pad} ${minY - pad} ${maxX - minX + pad * 2} ${maxY - minY + pad * 2}`;
+  const fs = span / 15;                       // label font size (viewBox = inches)
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+  const path = points.map((p, i) => `${i ? "L" : "M"}${p[0]},${p[1]}`).join(" ");
+  const dims = [], arcs = [];
+
+  // Segment length callouts, offset to the outside of the profile with a leader tick.
+  for (let i = 0; i < points.length - 1; i++) {
+    const [ax, ay] = points[i], [bx, by] = points[i + 1];
+    const len = Math.hypot(bx - ax, by - ay);
+    if (len < 0.05) continue;
+    const mx = (ax + bx) / 2, my = (ay + by) / 2;
+    const ux = (bx - ax) / len, uy = (by - ay) / len;
+    let nx = -uy, ny = ux;
+    const off = fs * 1.7;
+    if (Math.hypot(mx + nx * off - cx, my + ny * off - cy) < Math.hypot(mx - nx * off - cx, my - ny * off - cy)) { nx = -nx; ny = -ny; }
+    const lx = mx + nx * off, ly = my + ny * off;
+    dims.push(
+      <g key={`d${i}`}>
+        <line x1={mx + nx * fs * 0.25} y1={my + ny * fs * 0.25} x2={lx - nx * fs * 0.55} y2={ly - ny * fs * 0.55} stroke="#98a1a8" strokeWidth={span / 400} />
+        <text x={lx} y={ly + fs * 0.34} fontSize={fs} fontWeight="700" fill="#111" textAnchor="middle"
+          paintOrder="stroke" stroke="#ffffff" strokeWidth={fs / 3.5}>
+          {letters && letters[i] ? `${letters[i]} = ` : ""}{fmtIn(len)}
+        </text>
+      </g>
+    );
+  }
+
+  // Included angle at every bend: arc between the two legs + the degree value on the bisector.
+  for (let i = 1; i < points.length - 1; i++) {
+    const [px, py] = points[i];
+    const [ax, ay] = points[i - 1], [bx, by] = points[i + 1];
+    const l1 = Math.hypot(ax - px, ay - py), l2 = Math.hypot(bx - px, by - py);
+    if (l1 < 0.05 || l2 < 0.05) continue;
+    const a1 = Math.atan2(ay - py, ax - px), a2 = Math.atan2(by - py, bx - px);
+    let d0 = a2 - a1;
+    while (d0 > Math.PI) d0 -= 2 * Math.PI;
+    while (d0 < -Math.PI) d0 += 2 * Math.PI;
+    const deg = Math.abs(d0) * 180 / Math.PI;
+    if (deg > 178.5) continue; // effectively straight — nothing to mark
+    const r = Math.max(Math.min(l1, l2, span * 0.16) * 0.42, span * 0.045);
+    let d = "";
+    const N = 14;
+    for (let k = 0; k <= N; k++) { const a = a1 + (d0 * k) / N; d += `${k ? "L" : "M"}${px + Math.cos(a) * r},${py + Math.sin(a) * r}`; }
+    const bis = a1 + d0 / 2;
+    const tx = px + Math.cos(bis) * (r + fs * 1.0), ty = py + Math.sin(bis) * (r + fs * 1.0);
+    const label = (Math.round(deg * 2) / 2).toString().replace(/\.0$/, "");
+    arcs.push(
+      <g key={`a${i}`}>
+        <path d={d} fill="none" stroke="#0aa810" strokeWidth={span / 220} />
+        <text x={tx} y={ty + fs * 0.3} fontSize={fs * 0.88} fontWeight="700" fill="#0a7d10" textAnchor="middle"
+          paintOrder="stroke" stroke="#ffffff" strokeWidth={fs / 3.8}>{label}°</text>
+      </g>
+    );
+  }
+
+  return (
+    <svg viewBox={vb} style={{ width: "100%", height, display: "block", background: "#fff" }} preserveAspectRatio="xMidYMid meet">
+      <path d={path} fill="none" stroke="#c9ced2" strokeWidth={span / 34} strokeLinecap="round" strokeLinejoin="round" />
+      <path d={path} fill="none" stroke="#15191c" strokeWidth={span / 90} strokeLinecap="round" strokeLinejoin="round" />
+      {points.map((p, i) => <circle key={i} cx={p[0]} cy={p[1]} r={span / 130} fill="#15191c" />)}
+      {arcs}
+      {dims}
+    </svg>
+  );
+}
+
 // Renders the part's 3D preview to static SVG and lays it out on a title-blocked
 // drawing sheet with the full geometry (sizes + angles) and material spec.
-function partPreviewSvg(part, height = 380) {
+function partPreviewSvg(part, height = 380, showDims = true) {
   try {
     const t = typeById(part.flashing_type);
     const isSheet = (t.kind || "sheet") === "sheet";
     if (t.pan) return renderToStaticMarkup(<Pan3D p={part.params} height={height} />);
     if (t.outlet || !isSheet) return renderToStaticMarkup(<SinglePly3D geo={t.geometry(part.params)} materialCode={part.material_code} split={!!(part.params || {}).split} height={height} />);
     const pts = t.custom ? customProfilePoints((part.params || {}).segs || []) : t.points(part.params);
-    return renderToStaticMarkup(<Flashing3D points={pts} lengthFt={part.piece_length_ft || 10} materialCode={part.material_code} height={height} letters={t.letters ? t.letters(part.params) : null} />);
+    return renderToStaticMarkup(<Flashing3D points={pts} lengthFt={part.piece_length_ft || 10} materialCode={part.material_code} height={height} showDims={showDims} letters={showDims && t.letters ? t.letters(part.params) : null} />);
   } catch (e) { console.error("drawing preview failed", e); return ""; }
 }
 const escH = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
@@ -156,6 +234,7 @@ const SHEET_CSS = `body{font-family:Arial,Helvetica,sans-serif;color:#23282b;mar
 .tb b{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#6a7278;margin-bottom:2px;font-weight:700}
 .stage{padding:18px;text-align:center;background:#fbfcfc}
 .stage svg{max-width:100%;height:auto;max-height:430px}
+.cap{font-size:10px;color:#6a7278;letter-spacing:.06em;text-transform:uppercase;margin-top:4px;text-align:center;font-weight:700}
 .geom{padding:0 16px 14px}
 table{width:100%;border-collapse:collapse;font-size:12px;margin-top:10px}
 th{background:#2b2f31;color:#fff;text-align:left;padding:7px 8px;font-size:11px;text-transform:uppercase;letter-spacing:.04em}
@@ -203,7 +282,27 @@ function shopSheet(part, info, label = null) {
     if (part.girth) geomRows += `<tr><td><b>Stretch-out</b></td><td class="r" colspan="2"><b>${part.girth}"</b>${part.bends ? ` · ${part.bends} bends` : ""}</td></tr>`;
   }
   if (isSheet && !t.pan && !t.outlet) geomRows += `<tr><td>Piece length</td><td class="r" colspan="2">${part.piece_length_ft || 10}'-0"</td></tr>`;
-  const svg = partPreviewSvg(part);
+  // Main view: profile parts get a to-scale dimensioned 2D cross-section (every
+  // length + bend angle marked on the drawing) with a small isometric beside it;
+  // pans / outlets / membrane parts keep their 3D view.
+  let stage = "";
+  const isProfile = isSheet && !t.pan && !t.outlet;
+  if (isProfile) {
+    try {
+      const pts = t.custom ? customProfilePoints(p.segs || []) : t.points(p);
+      const letters = t.letters ? t.letters(p) : (t.custom ? (p.segs || []).map((_, i) => String.fromCharCode(65 + i)) : null);
+      const prof = renderToStaticMarkup(<ProfileDrawing points={pts} letters={letters} height={410} />);
+      const iso = partPreviewSvg(part, 215, false);
+      stage = `<div style="display:flex;gap:18px;align-items:center;justify-content:center;flex-wrap:wrap">
+<div style="flex:1 1 400px;min-width:320px">${prof}<div class="cap">Profile — cross-section · lengths in inches · bend angles shown included</div></div>
+<div style="flex:0 1 250px;min-width:210px">${iso}<div class="cap">${part.piece_length_ft || 10}'-0" piece — isometric</div></div>
+</div>`;
+    } catch (e) { console.error("profile drawing failed", e); }
+  }
+  if (!stage) {
+    const svg = partPreviewSvg(part);
+    stage = svg || '<div class="sub">(no preview available)</div>';
+  }
   const today = fmtDate(new Date().toISOString());
   return `<div class="sheet">
 <div class="hd"><div><img src="${FT_LOGO}" alt="Flash-Tech Mfg, Inc." style="height:44px;display:block"><div class="sub">${FT_INFO.addr} · ${FT_INFO.phone}</div></div>
@@ -220,7 +319,7 @@ function shopSheet(part, info, label = null) {
 <div><b>Quantity</b>${escH(info.qty || "—")}</div>
 <div><b>Scale</b>NTS</div>
 </div>
-<div class="stage">${svg || '<div class="sub">(no preview available)</div>'}</div>
+<div class="stage">${stage}</div>
 <div class="geom">
 <table><thead><tr><th>Dimension</th><th style="text-align:right">Size</th><th style="text-align:right">Angle</th></tr></thead><tbody>${geomRows}</tbody></table>
 ${info.notes ? `<div style="font-size:12px;margin-top:10px"><b>Notes:</b> ${escH(info.notes)}</div>` : ""}
