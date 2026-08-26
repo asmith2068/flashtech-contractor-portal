@@ -735,7 +735,7 @@ export const BUILDER_MARKUP = 1.20;
 //                scuppers, box caps, drop outlets). Metal-builder profiles use the
 //                per-inch stretch rates instead.
 //   clipEach   — $ per box-gutter hanging clip (4 per 10' section).
-export const PRICING = {
+export const PRICING_DEFAULTS = {
   stretch: {
     G26: 3.70,   // Galvanized 26ga
     G24: 4.25,   // Galvanized 24ga
@@ -756,17 +756,27 @@ export const PRICING = {
   builderPct: 0,
   clipEach: 6.00,
 };
-// Overlay admin-saved pricing (from the server) onto the defaults.
-export const applyPricing = (p) => {
-  if (!p || typeof p !== "object") return;
-  if (p.stretch && typeof p.stretch === "object") {
-    for (const k of Object.keys(PRICING.stretch)) {
-      if (k in p.stretch) PRICING.stretch[k] = p.stretch[k] === null || p.stretch[k] === "" ? null : (parseFloat(p.stretch[k]) || null);
+// The LIVE pricing every price function reads.
+export const PRICING = { ...PRICING_DEFAULTS, stretch: { ...PRICING_DEFAULTS.stretch }, catPct: {} };
+// Rebuild the live pricing from the defaults plus any number of override layers,
+// in order — e.g. applyPricing(globalSheet, thisCustomersSheet). A field a layer
+// doesn't mention falls through to the layer (or default) below it.
+export const applyPricing = (...layers) => {
+  PRICING.stretch = { ...PRICING_DEFAULTS.stretch };
+  PRICING.catPct = {};
+  PRICING.builderPct = PRICING_DEFAULTS.builderPct;
+  PRICING.clipEach = PRICING_DEFAULTS.clipEach;
+  for (const p of layers) {
+    if (!p || typeof p !== "object") continue;
+    if (p.stretch && typeof p.stretch === "object") {
+      for (const k of Object.keys(PRICING.stretch)) {
+        if (k in p.stretch) PRICING.stretch[k] = p.stretch[k] === null || p.stretch[k] === "" ? null : (parseFloat(p.stretch[k]) || null);
+      }
     }
+    if (p.catPct && typeof p.catPct === "object") PRICING.catPct = { ...p.catPct };
+    if (p.builderPct != null && !isNaN(parseFloat(p.builderPct))) PRICING.builderPct = parseFloat(p.builderPct);
+    if (p.clipEach != null && !isNaN(parseFloat(p.clipEach))) PRICING.clipEach = parseFloat(p.clipEach);
   }
-  if (p.catPct && typeof p.catPct === "object") PRICING.catPct = { ...p.catPct };
-  if (p.builderPct != null && !isNaN(parseFloat(p.builderPct))) PRICING.builderPct = parseFloat(p.builderPct);
-  if (p.clipEach != null && !isNaN(parseFloat(p.clipEach))) PRICING.clipEach = parseFloat(p.clipEach);
 };
 // % multipliers derived from the runtime pricing
 const builderMult = () => 1 + (PRICING.builderPct || 0) / 100;

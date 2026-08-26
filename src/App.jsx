@@ -865,7 +865,7 @@ function CatalogPage({ products, onAdd, disc = (x) => x, discPct = 0, seedCat = 
                 </td>
                 <td style={{ fontWeight: 700, whiteSpace: "nowrap" }}>{p.sku}</td>
                 <td>{p.description}<br /><small style={{ color: "var(--mut)" }}>{p.category}</small></td>
-                <td style={{ whiteSpace: "nowrap" }}>{discPct > 0 && <s style={{ color: "var(--mut)", marginRight: 6, fontWeight: 400 }}>{fmt(p.price)}</s>}<b>{fmt(disc(p.price))}</b> / {p.unit === "lf" ? "LF" : "EA"}</td>
+                <td style={{ whiteSpace: "nowrap" }}>{(() => { const lp = categoryAdjust(p.price, p.category); return (<>{discPct > 0 && <s style={{ color: "var(--mut)", marginRight: 6, fontWeight: 400 }}>{fmt(lp)}</s>}<b>{fmt(disc(lp))}</b> / {p.unit === "lf" ? "LF" : "EA"}</>); })()}</td>
                 {!readOnly && <td>
                   <div className="row">
                     <input type="number" min="1" style={{ width: 86 }} placeholder={p.unit === "lf" ? "Lin. ft" : "Qty"}
@@ -2254,24 +2254,80 @@ const STRETCH_MATERIALS = [
   { code: "CU16", label: "Copper 16oz (~24ga)" }, { code: "CU20", label: "Copper 20oz (~22ga)" },
   { code: "TPOC", label: "TPO-Clad Metal" }, { code: "PVCC", label: "PVC-Clad Metal" },
 ];
-function AdminPricing({ products, onSave }) {
+function AdminPricing({ products, onSave, contractors = [], overrides = {}, onSaveCustomer = null }) {
   const cats = useMemo(() => [...new Set(products.map((p) => p.category))].sort(), [products]);
-  // Seeded from the LIVE pricing (defaults + whatever was last saved).
-  const [catPct, setCatPct] = useState(() => ({ ...PRICING.catPct }));
-  const [builderPct, setBuilderPct] = useState(PRICING.builderPct || 0);
-  const [clipEach, setClipEach] = useState(PRICING.clipEach);
-  const [stretch, setStretch] = useState(() => {
-    const o = {}; for (const m of STRETCH_MATERIALS) o[m.code] = PRICING.stretch[m.code] ?? ""; return o;
-  });
+  // "" = the default sheet everyone gets; a contractor id = that customer's own
+  // sheet. Customer sheets seed from the customer's current effective rates and,
+  // once saved, fully replace the defaults for that customer.
+  const [custId, setCustId] = useState("");
+  const seedFor = (id) => {
+    const ov = (id && overrides[id]) || null;
+    const st = {};
+    for (const m of STRETCH_MATERIALS) {
+      const v = ov && ov.stretch && m.code in ov.stretch ? ov.stretch[m.code] : PRICING.stretch[m.code];
+      st[m.code] = v ?? "";
+    }
+    return {
+      catPct: { ...((ov && ov.catPct) || PRICING.catPct) },
+      builderPct: (ov && ov.builderPct != null ? ov.builderPct : PRICING.builderPct) || 0,
+      clipEach: ov && ov.clipEach != null ? ov.clipEach : PRICING.clipEach,
+      stretch: st,
+    };
+  };
+  const [catPct, setCatPct] = useState(() => seedFor("").catPct);
+  const [builderPct, setBuilderPct] = useState(() => seedFor("").builderPct);
+  const [clipEach, setClipEach] = useState(() => seedFor("").clipEach);
+  const [stretch, setStretch] = useState(() => seedFor("").stretch);
   const [busy, setBusy] = useState(false);
+  const pickCustomer = (id) => {
+    setCustId(id);
+    const s = seedFor(id);
+    setCatPct(s.catPct); setBuilderPct(s.builderPct); setClipEach(s.clipEach); setStretch(s.stretch);
+  };
+  // Reseed when the underlying sheets actually change (a save landed) — keyed on
+  // content, so the 60s auto-refresh doesn't wipe in-progress edits.
+  const dataKey = JSON.stringify(overrides);
+  useEffect(() => { pickCustomer(custId); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [dataKey]);
+  const payload = () => {
+    const st = {}; for (const m of STRETCH_MATERIALS) { const v = stretch[m.code]; st[m.code] = v === "" || v == null ? null : Math.max(0, parseFloat(v) || 0) || null; }
+    return { catPct, builderPct: parseFloat(builderPct) || 0, clipEach: Math.max(0, parseFloat(clipEach) || 0), stretch: st };
+  };
   const save = async () => {
     setBusy(true);
-    const st = {}; for (const m of STRETCH_MATERIALS) { const v = stretch[m.code]; st[m.code] = v === "" || v == null ? null : Math.max(0, parseFloat(v) || 0) || null; }
-    await onSave({ catPct, builderPct: parseFloat(builderPct) || 0, clipEach: Math.max(0, parseFloat(clipEach) || 0), stretch: st });
+    if (custId) await onSaveCustomer(custId, payload());
+    else await onSave(payload());
     setBusy(false);
   };
+  const removeCustom = async () => {
+    if (!window.confirm("Remove this customer's custom pricing? They go back to the default rates.")) return;
+    setBusy(true);
+    await onSaveCustomer(custId, null);
+    setBusy(false);
+  };
+  const cust = contractors.find((c) => c.id === custId);
   return (
     <div>
+      <div className="card" style={{ marginBottom: 14 }}>
+        <div className="row" style={{ flexWrap: "wrap", alignItems: "center", gap: 12 }}>
+          <div className="fld" style={{ margin: 0, minWidth: 280, flex: "0 1 360px" }}>
+            <label>Pricing For</label>
+            <select value={custId} onChange={(e) => pickCustomer(e.target.value)}>
+              <option value="">Default — all customers</option>
+              {contractors.map((c) => (
+                <option key={c.id} value={c.id}>{c.company || c.name}{overrides[c.id] ? " ★ custom" : ""}</option>
+              ))}
+            </select>
+          </div>
+          <div style={{ flex: 1, minWidth: 220, fontSize: 12, color: "var(--mut)" }}>
+            {custId
+              ? <>Editing <b style={{ color: "var(--ink)" }}>{cust?.company || cust?.name}</b>'s own price sheet — it replaces the default sheet for them only.{overrides[custId] ? "" : " Nothing is saved for them yet; Save creates their sheet."}</>
+              : <>The default sheet — applies to every customer without a ★ custom sheet, and to the guest builder.</>}
+          </div>
+          {custId && overrides[custId] && (
+            <button className="btn btn-d btn-sm" disabled={busy} onClick={removeCustom}>{IC.trash}&nbsp;Remove custom pricing</button>
+          )}
+        </div>
+      </div>
       <div className="g2" style={{ alignItems: "start" }}>
         <div className="card">
           <b style={{ display: "block", marginBottom: 4 }}>Catalog — % by category</b>
@@ -2326,8 +2382,10 @@ function AdminPricing({ products, onSave }) {
         </div>
       </div>
       <div className="row" style={{ marginTop: 14 }}>
-        <button className="btn btn-p" disabled={busy} onClick={save}>{IC.send}&nbsp;{busy ? "Saving…" : "Save Pricing"}</button>
-        <span style={{ fontSize: 12, color: "var(--mut)", alignSelf: "center" }}>Takes effect immediately for every customer, distributor and the guest builder.</span>
+        <button className="btn btn-p" disabled={busy} onClick={save}>{IC.send}&nbsp;{busy ? "Saving…" : custId ? `Save for ${cust?.company || cust?.name || "customer"}` : "Save Default Pricing"}</button>
+        <span style={{ fontSize: 12, color: "var(--mut)", alignSelf: "center" }}>
+          {custId ? "Applies only to this customer — takes effect immediately for their logins and their distributor." : "Takes effect immediately for every customer without a custom sheet, and the guest builder."}
+        </span>
       </div>
     </div>
   );
@@ -2559,7 +2617,8 @@ export default function App() {
   const [contractors, setContractors] = useState([]);
   const [staff, setStaff] = useState([]); // admin + distributor logins (managed on the Team page)
   const [invites, setInvites] = useState([]); // distributor's customer sign-up PINs
-  const [pricing, setPricing] = useState(null); // admin-saved pricing overrides (also applied into catalog.js)
+  const [pricing, setPricing] = useState(null); // admin-saved GLOBAL pricing sheet
+  const [custPricing, setCustPricing] = useState({}); // per-customer pricing sheets, keyed by contractor id
   const [editSeed, setEditSeed] = useState({ item: null, nonce: 0 }); // cart line being edited in the builder
   const [actingId, setActingId] = useState(() => { try { return localStorage.getItem("ftp_acting") || ""; } catch { return ""; } }); // distributor: which customer they're working for
   const [menuOpen, setMenuOpen] = useState(false); // mobile slide-in nav drawer
@@ -2604,6 +2663,10 @@ export default function App() {
   // Per-contractor discount: list prices are stored everywhere; this applies their % when shown/added.
   const discPct = Number(priceFor?.discount_pct) || 0;
   const applyDisc = (p) => Math.round(p * (1 - discPct / 100) * 100) / 100;
+  // Layer the live pricing for THIS viewer: code defaults → global sheet → the
+  // customer's own sheet (their login, or whoever a distributor is working for).
+  // Runs every render so switching customers reprices instantly.
+  applyPricing(pricing, priceFor ? custPricing[priceFor.id] : null);
 
   // One call: the server decides what this login is allowed to see (admin -> everyone,
   // distributor -> their own customers, contractor -> themselves) and returns only that.
@@ -2611,11 +2674,12 @@ export default function App() {
     if (!sess) return;
     try {
       const d = await api("loadAll");
-      // Admin pricing first (per-inch stretch rates, builder %, category %) so the
-      // catalog prices below and every builder price use the saved numbers.
-      applyPricing(d.pricing);
+      // Pricing sheets: global + per-customer. They're layered onto the live rates
+      // in the render body (the customer layer depends on who we're pricing for),
+      // and the catalog applies its category % at display time for the same reason.
       setPricing(d.pricing || {});
-      if (d.products?.length) setProducts(d.products.map((p) => ({ ...p, price: categoryAdjust(p.price, p.category) })));
+      setCustPricing(d.pricingOverrides || {});
+      if (d.products?.length) setProducts(d.products);
       setRequests(d.requests || []);
       setItems(d.items || []);
       setMsgs(d.messages || []);
@@ -2638,9 +2702,8 @@ export default function App() {
   useEffect(() => {
     if (!guest || session) return;
     api("products").then((d) => {
-      applyPricing(d.pricing);
       setPricing(d.pricing || {});
-      if (d.products?.length) setProducts(d.products.map((p) => ({ ...p, price: categoryAdjust(p.price, p.category) })));
+      if (d.products?.length) setProducts(d.products);
     }).catch(() => {});
   }, [guest, session]);
   // Auto-refresh so the admin sees new requests / replies come in
@@ -2701,7 +2764,7 @@ export default function App() {
 
   // ── cart ops ──
   const addProduct = (p, qty) => {
-    const up = applyDisc(p.price);
+    const up = applyDisc(categoryAdjust(p.price, p.category));
     setCart((c) => [...c, { key: uid(), kind: "product", sku: p.sku, description: p.description, unit: p.unit, qty, unit_price: up, line_total: Math.round(up * qty * 100) / 100 }]);
     flash(`Added ${qty} ${p.unit === "lf" ? "LF" : "x"} ${p.sku}`);
   };
@@ -2947,7 +3010,15 @@ export default function App() {
     try { await api("savePricing", { pricing: next }); }
     catch (e) { alert("Could not save pricing: " + e.message); return false; }
     await loadAll(session); // re-applies rates + re-prices the catalog
-    flash("Pricing saved — new rates are live for everyone.");
+    flash("Default pricing saved — live for every customer without a custom sheet.");
+    return true;
+  };
+  // Per-customer sheet — overrides the defaults for that contractor only; null removes it.
+  const saveCustomerPricing = async (contractorId, next) => {
+    try { await api("saveCustomerPricing", { contractorId, pricing: next }); }
+    catch (e) { alert("Could not save customer pricing: " + e.message); return false; }
+    await loadAll(session);
+    flash(next ? "Custom pricing saved — live for this customer now." : "Custom pricing removed — this customer is back on default rates.");
     return true;
   };
 
@@ -3096,7 +3167,7 @@ export default function App() {
           {page === "customers" && isAdmin && <AdminCustomers contractors={contractors} requests={requests} onSave={saveContractor} onDelete={deleteContractor} onCreate={createContractor} onNotify={notifyContractor} distributors={staff.filter((u) => u.role === "distributor")} />}
           {page === "customers" && isDist && <DistributorCustomers me={session} contractors={contractors} requests={requests} invites={invites} onSave={saveContractor} onCreate={createContractor} onNotify={notifyContractor} onGenPin={genPin} onRevokePin={revokePin} />}
           {page === "team" && isAdmin && <AdminUsers users={staff} meId={session.id} onCreate={createUser} onSave={saveUser} onDelete={deleteUser} />}
-          {page === "pricing" && isAdmin && <AdminPricing key={JSON.stringify(pricing || {})} products={products} onSave={savePricing} />}
+          {page === "pricing" && isAdmin && <AdminPricing products={products} contractors={contractors} overrides={custPricing} onSave={savePricing} onSaveCustomer={saveCustomerPricing} />}
           {page === "downloads" && <DownloadsPage />}
           {page === "shop" && !isAdmin && !isDist && <ShopPage products={products} discPct={discPct} onPickCategory={openCategory} onBuilder={openBuilder} />}
           {page === "catalog" && isAdmin && <CatalogPage products={products} readOnly />}

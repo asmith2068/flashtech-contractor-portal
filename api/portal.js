@@ -68,11 +68,25 @@ const err = (code, message) => { const e = new Error(message); e.code = code; th
 // hidden portal_products row so it needs no schema change. active=false keeps it out
 // of every catalog query; the client overlays it onto its built-in defaults.
 const PRICING_SKU = "__PRICING__";
+const custPricingSku = (id) => `${PRICING_SKU}${id}`; // per-customer sheet: "__PRICING__<contractor uuid>"
 async function getPricing() {
   try {
     const { data } = await db.from("portal_products").select("description").eq("sku", PRICING_SKU).maybeSingle();
     return data && data.description ? JSON.parse(data.description) : null;
   } catch { return null; }
+}
+// All per-customer pricing sheets, keyed by contractor id. Rows live in the same
+// hidden `_settings` namespace as the global sheet, so no schema change.
+async function getPricingOverrides() {
+  const map = {};
+  try {
+    const { data } = await db.from("portal_products").select("sku,description").eq("category", "_settings").eq("active", false);
+    for (const r of data || []) {
+      if (r.sku === PRICING_SKU || !String(r.sku).startsWith(PRICING_SKU)) continue;
+      try { map[r.sku.slice(PRICING_SKU.length)] = JSON.parse(r.description); } catch { /* skip a bad row */ }
+    }
+  } catch { /* empty map */ }
+  return map;
 }
 
 async function sendResetEmail(to, link) {
@@ -258,7 +272,20 @@ export default async function handler(req, res) {
           const { data } = await db.from("portal_custom_flashings").select("*").eq("contractor_id", a.id).order("created_at", { ascending: false });
           parts = data || [];
         }
-        return res.json({ user: clean(me), products: products || [], requests, items, messages, contractors, staff, parts, invites, pricing: await getPricing() });
+        // Per-customer pricing sheets, scoped to what this login may know about:
+        // admin sees all of them, a distributor only their own customers', and a
+        // contractor only their own.
+        let pricingOverrides = {};
+        if (a.role === "admin") {
+          pricingOverrides = await getPricingOverrides();
+        } else if (a.role === "distributor") {
+          const all = await getPricingOverrides();
+          for (const c of contractors) if (all[c.id]) pricingOverrides[c.id] = all[c.id];
+        } else {
+          const all = await getPricingOverrides();
+          if (all[a.id]) pricingOverrides[a.id] = all[a.id];
+        }
+        return res.json({ user: clean(me), products: products || [], requests, items, messages, contractors, staff, parts, invites, pricing: await getPricing(), pricingOverrides });
       }
 
       // ── admin: pricing (category %, builder %, per-inch stretch rates) ──
@@ -272,6 +299,25 @@ export default async function handler(req, res) {
         if (json.length > 20000) return res.status(400).json({ error: "Pricing payload too large." });
         const { error } = await db.from("portal_products").upsert(
           { sku: PRICING_SKU, category: "_settings", description: json, unit: "ea", price: 0, active: false },
+          { onConflict: "sku" });
+        if (error) return res.status(400).json({ error: error.message });
+        return res.json({ ok: true });
+      }
+      // Per-customer pricing sheet: overrides the global sheet for that contractor
+      // only. pricing = null removes it (they fall back to the defaults).
+      case "saveCustomerPricing": {
+        const a = needAdmin();
+        const { data: c } = await db.from("portal_users").select("id,role").eq("id", body.contractorId).maybeSingle();
+        if (!c || c.role !== "contractor") return res.status(404).json({ error: "Customer not found." });
+        if (!body.pricing) {
+          const { error } = await db.from("portal_products").delete().eq("sku", custPricingSku(c.id));
+          if (error) return res.status(400).json({ error: error.message });
+          return res.json({ ok: true, removed: true });
+        }
+        const json = JSON.stringify(body.pricing);
+        if (json.length > 20000) return res.status(400).json({ error: "Pricing payload too large." });
+        const { error } = await db.from("portal_products").upsert(
+          { sku: custPricingSku(c.id), category: "_settings", description: json, unit: "ea", price: 0, active: false },
           { onConflict: "sku" });
         if (error) return res.status(400).json({ error: error.message });
         return res.json({ ok: true });
@@ -444,6 +490,7 @@ export default async function handler(req, res) {
         needAdmin();
         const { error } = await db.from("portal_users").delete().eq("id", body.id);
         if (error) return res.status(400).json({ error: error.message });
+        await db.from("portal_products").delete().eq("sku", custPricingSku(body.id)); // their pricing sheet, if any
         return res.json({ ok: true });
       }
       case "resetCustomerPassword": {
