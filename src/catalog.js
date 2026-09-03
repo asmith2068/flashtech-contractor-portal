@@ -424,6 +424,8 @@ export const FLASHING_TYPES = [
       { key: "width", label: "Wall Width (in)", def: 12, min: 4, max: 30 },
       { key: "front", label: "Front Face (in)", def: 4, min: 1, max: 12 },
       { key: "back", label: "Back Face (in)", def: 3, min: 1, max: 12 },
+      { key: "faceAngle", label: "Front Face Bend (°, 90 = plumb)", def: 90, min: 45, max: 135, step: 1 },
+      { key: "backAngle", label: "Back Face Bend (°, 90 = plumb)", def: 90, min: 45, max: 135, step: 1 },
       { key: "kick", label: "Kick-Out (in)", def: 0.5, min: 0.25, max: 2, step: 0.25 },
       { key: "kickAngle", label: "Kick Angle (°)", def: 45, min: 15, max: 75, step: 5 },
       { key: "edge", label: "Bottom Edge", type: "choice", def: "kick", options: [{ value: "kick", label: "Kick only" }, { value: "hemkick", label: "Hem + Kick" }] },
@@ -436,18 +438,26 @@ export const FLASHING_TYPES = [
       const kick = p.kick ?? 0.5;
       const hem = p.edge === "hemkick";
       const hl = 0.5; // hemmed return length
+      // Face bend deviation from plumb: >90° splays the face out, <90° tucks it in.
+      const fd = rad((p.faceAngle ?? 90) - 90);
+      const bd = rad((p.backAngle ?? 90) - 90);
       const pts = [];
-      // front face (left, x=0) — kicks OUT, away from the wall (-x)
-      const fKick = [-Math.sin(ka) * kick, p.front + Math.cos(ka) * kick];
+      // front face (left, from [0,0]) — hangs at its bend angle, kick continues OUT from the face
+      const fEnd = [-Math.sin(fd) * p.front, Math.cos(fd) * p.front];
+      const fKick = [fEnd[0] - Math.sin(fd + ka) * kick, fEnd[1] + Math.cos(fd + ka) * kick];
       if (hem) pts.push([fKick[0] + hl, fKick[1]]); // folded return tucked under the kick
-      pts.push(fKick, [0, p.front], [0, 0], [p.width, slope], [p.width, slope + p.back]);
-      // back face (right, x=width) — kicks OUT (+x)
-      const bKick = [p.width + Math.sin(ka) * kick, slope + p.back + Math.cos(ka) * kick];
-      pts.push(bKick);
+      pts.push(fKick, fEnd, [0, 0], [p.width, slope]);
+      // back face (right, from [width, slope]) — its own bend angle, kick OUT (+x)
+      const bEnd = [p.width + Math.sin(bd) * p.back, slope + Math.cos(bd) * p.back];
+      const bKick = [bEnd[0] + Math.sin(bd + ka) * kick, bEnd[1] + Math.cos(bd + ka) * kick];
+      pts.push(bEnd, bKick);
       if (hem) pts.push([bKick[0] - hl, bKick[1]]);
       return pts;
     },
-    dims: (p) => `${p.width}" wall, ${p.front}"/${p.back}" faces, ${p.kick ?? 0.5}" kick-out @ ${p.kickAngle ?? 45}°${p.edge === "hemkick" ? ", hemmed" : ""}` +
+    dims: (p) => `${p.width}" wall, ${p.front}"/${p.back}" faces` +
+      ((p.faceAngle ?? 90) !== 90 ? `, front face @ ${p.faceAngle}°` : "") +
+      ((p.backAngle ?? 90) !== 90 ? `, back face @ ${p.backAngle}°` : "") +
+      `, ${p.kick ?? 0.5}" kick-out @ ${p.kickAngle ?? 45}°${p.edge === "hemkick" ? ", hemmed" : ""}` +
       (p.cleat === "segmented" ? ", segmented cleats" : p.cleat === "none" ? "" : ", full-length cleat") +
       (p.splice === "no" ? "" : ", splice plates"),
   },

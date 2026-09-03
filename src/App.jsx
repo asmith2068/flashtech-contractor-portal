@@ -232,8 +232,8 @@ const SHEET_CSS = `body{font-family:Arial,Helvetica,sans-serif;color:#23282b;mar
 .tb{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:2px solid #23282b;font-size:12px}
 .tb>div{padding:7px 10px;border-right:1px solid #c9cdd0}.tb>div:last-child{border-right:none}
 .tb b{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#6a7278;margin-bottom:2px;font-weight:700}
-.stage{padding:18px;text-align:center;background:#fbfcfc}
-.stage svg{max-width:100%;height:auto;max-height:430px}
+.stage{padding:14px;text-align:center;background:#fbfcfc}
+.stage svg{max-width:100%;height:auto;max-height:580px}
 .cap{font-size:10px;color:#6a7278;letter-spacing:.06em;text-transform:uppercase;margin-top:4px;text-align:center;font-weight:700}
 .geom{padding:0 16px 14px}
 table{width:100%;border-collapse:collapse;font-size:12px;margin-top:10px}
@@ -291,16 +291,16 @@ function shopSheet(part, info, label = null) {
     try {
       const pts = t.custom ? customProfilePoints(p.segs || []) : t.points(p);
       const letters = t.letters ? t.letters(p) : (t.custom ? (p.segs || []).map((_, i) => String.fromCharCode(65 + i)) : null);
-      const prof = renderToStaticMarkup(<ProfileDrawing points={pts} letters={letters} height={410} />);
-      const iso = partPreviewSvg(part, 215, false);
-      stage = `<div style="display:flex;gap:18px;align-items:center;justify-content:center;flex-wrap:wrap">
-<div style="flex:1 1 400px;min-width:320px">${prof}<div class="cap">Profile — cross-section · lengths in inches · bend angles shown included</div></div>
-<div style="flex:0 1 250px;min-width:210px">${iso}<div class="cap">${part.piece_length_ft || 10}'-0" piece — isometric</div></div>
+      const prof = renderToStaticMarkup(<ProfileDrawing points={pts} letters={letters} height={540} />);
+      const iso = partPreviewSvg(part, 320, false);
+      stage = `<div style="display:flex;gap:16px;align-items:center;justify-content:center;flex-wrap:wrap">
+<div style="flex:1 1 520px;min-width:380px">${prof}<div class="cap">Profile — cross-section · lengths in inches · bend angles shown included</div></div>
+<div style="flex:0 1 300px;min-width:250px">${iso}<div class="cap">${part.piece_length_ft || 10}'-0" piece — isometric</div></div>
 </div>`;
     } catch (e) { console.error("profile drawing failed", e); }
   }
   if (!stage) {
-    const svg = partPreviewSvg(part);
+    const svg = partPreviewSvg(part, 480);
     stage = svg || '<div class="sub">(no preview available)</div>';
   }
   const today = fmtDate(new Date().toISOString());
@@ -1250,6 +1250,29 @@ function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc =
     setTypeId(id); setParams(defaultParams(id)); setMatCode(nk === "sheet" ? "G26" : "TPO-W"); setDrawMode(false);
     if (id === "customProfile") setHowToSeen(false); // offer the how-to each time the profile builder is opened
   };
+  // Profile builder: append/prepend a ½" hem (~170° fold-back) or kick (35° flare)
+  // as a real, editable segment — pricing, stretch-out, DXF and the drawings all
+  // pick it up like any other segment. Fold direction follows the profile's own
+  // bend direction; the user can flip the sign in the segment rows if needed.
+  const addEdgeSeg = (where, kind) => setParams((pp) => {
+    const segs = [...(pp.segs || [])];
+    if (!segs.length) return pp;
+    const LEN = 0.5, HEM = 170, KICK = 35;
+    const sgn = (v) => ((parseFloat(v) || 0) >= 0 ? 1 : -1);
+    if (where === "end") {
+      const lastBend = [...segs.slice(1)].reverse().find((s) => parseFloat(s.ang));
+      const s0 = sgn(lastBend ? lastBend.ang : 1);
+      segs.push({ len: LEN, ang: kind === "hem" ? -s0 * HEM : s0 * KICK });
+    } else {
+      const firstBend = segs.slice(1).find((s) => parseFloat(s.ang));
+      const s0 = sgn(firstBend ? firstBend.ang : 1);
+      const h = parseFloat(segs[0].ang) || 0;                       // current start heading
+      const delta = kind === "hem" ? s0 * HEM : -s0 * KICK;
+      segs[0] = { ...segs[0], ang: -delta };                        // old first segment bends back to its heading
+      segs.unshift({ len: LEN, ang: h + delta });                   // new leg carries the start heading
+    }
+    return { ...pp, segs };
+  });
   // when a photo is identified, jump the builder to the detected type
   useEffect(() => {
     if (detectNonce && detectInfo?.typeId && typeById(detectInfo.typeId)) { pickType(detectInfo.typeId); setSaved(""); }
@@ -1355,6 +1378,20 @@ function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc =
           </>
         )}
         {isCustom && <ProfileEditor segs={params.segs || []} onChange={(segs) => setParams((pp) => ({ ...pp, segs }))} />}
+        {isCustom && (params.segs || []).length > 0 && !drawMode && (
+          <div className="fld">
+            <label>Edge Options — hem / kick</label>
+            <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>
+              <button className="btn btn-o btn-sm" onClick={() => addEdgeSeg("start", "hem")}>+ Hem @ Start</button>
+              <button className="btn btn-o btn-sm" onClick={() => addEdgeSeg("start", "kick")}>+ Kick @ Start</button>
+              <button className="btn btn-o btn-sm" onClick={() => addEdgeSeg("end", "hem")}>+ Hem @ End</button>
+              <button className="btn btn-o btn-sm" onClick={() => addEdgeSeg("end", "kick")}>+ Kick @ End</button>
+            </div>
+            <div style={{ fontSize: 12, color: "var(--mut)", marginTop: 4 }}>
+              Adds an editable ½" segment — hems fold back ~170°, kicks flare 35°. If one folds the wrong way, flip the sign of its angle in the rows above.
+            </div>
+          </div>
+        )}
         {t.fields.map((f) => (
           <div className="fld" key={f.key}>
             <label>{f.label}</label>
