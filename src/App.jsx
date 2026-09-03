@@ -1186,6 +1186,8 @@ function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc =
   const [showDemo, setShowDemo] = useState(false);
   const [howToSeen, setHowToSeen] = useState(false);
   const [profView, setProfView] = useState("2d"); // custom profile preview: 2d cross-section or 3d piece
+  const [edgeKick, setEdgeKick] = useState("0.5"); // profile-builder edge sizes (inches)
+  const [edgeHem, setEdgeHem] = useState("0.5");
   const [editKey, setEditKey] = useState(null);   // cart-line key being edited (Add button replaces it)
 
   const t = typeById(typeId);
@@ -1250,27 +1252,37 @@ function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc =
     setTypeId(id); setParams(defaultParams(id)); setMatCode(nk === "sheet" ? "G26" : "TPO-W"); setDrawMode(false);
     if (id === "customProfile") setHowToSeen(false); // offer the how-to each time the profile builder is opened
   };
-  // Profile builder: append/prepend a ½" hem (~170° fold-back) or kick (35° flare)
-  // as a real, editable segment — pricing, stretch-out, DXF and the drawings all
-  // pick it up like any other segment. Fold direction follows the profile's own
+  // Profile builder: add a kick (35° flare) + hem (~170° fold-back) to either end
+  // as real, editable segments — pricing, stretch-out, DXF and the drawings all
+  // pick them up like any other segment. Fold direction follows the profile's own
   // bend direction; the user can flip the sign in the segment rows if needed.
-  const addEdgeSeg = (where, kind) => setParams((pp) => {
-    const segs = [...(pp.segs || [])];
-    if (!segs.length) return pp;
-    const LEN = 0.5, HEM = 170, KICK = 35;
+  const insertEdge = (segs, where, kind, len) => {
+    const out = [...segs];
+    const HEM = 170, KICK = 35;
     const sgn = (v) => ((parseFloat(v) || 0) >= 0 ? 1 : -1);
     if (where === "end") {
-      const lastBend = [...segs.slice(1)].reverse().find((s) => parseFloat(s.ang));
+      const lastBend = [...out.slice(1)].reverse().find((s) => parseFloat(s.ang));
       const s0 = sgn(lastBend ? lastBend.ang : 1);
-      segs.push({ len: LEN, ang: kind === "hem" ? -s0 * HEM : s0 * KICK });
+      out.push({ len, ang: kind === "hem" ? -s0 * HEM : s0 * KICK });
     } else {
-      const firstBend = segs.slice(1).find((s) => parseFloat(s.ang));
+      const firstBend = out.slice(1).find((s) => parseFloat(s.ang));
       const s0 = sgn(firstBend ? firstBend.ang : 1);
-      const h = parseFloat(segs[0].ang) || 0;                       // current start heading
+      const h = parseFloat(out[0].ang) || 0;                        // current start heading
       const delta = kind === "hem" ? s0 * HEM : -s0 * KICK;
-      segs[0] = { ...segs[0], ang: -delta };                        // old first segment bends back to its heading
-      segs.unshift({ len: LEN, ang: h + delta });                   // new leg carries the start heading
+      out[0] = { ...out[0], ang: -delta };                          // old first segment bends back to its heading
+      out.unshift({ len, ang: h + delta });                         // new leg carries the start heading
     }
+    return out;
+  };
+  // One click = kick then hem at that end, sized by the two inputs (0 skips one).
+  const addEdges = (where) => setParams((pp) => {
+    let segs = [...(pp.segs || [])];
+    if (!segs.length) return pp;
+    const K = Math.max(0, parseFloat(edgeKick) || 0);
+    const H = Math.max(0, parseFloat(edgeHem) || 0);
+    if (!K && !H) return pp;
+    if (K) segs = insertEdge(segs, where, "kick", K);
+    if (H) segs = insertEdge(segs, where, "hem", H);   // hem folds off the kick (or the profile if no kick)
     return { ...pp, segs };
   });
   // when a photo is identified, jump the builder to the detected type
@@ -1380,15 +1392,17 @@ function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc =
         {isCustom && <ProfileEditor segs={params.segs || []} onChange={(segs) => setParams((pp) => ({ ...pp, segs }))} />}
         {isCustom && (params.segs || []).length > 0 && !drawMode && (
           <div className="fld">
-            <label>Edge Options — hem / kick</label>
-            <div className="row" style={{ flexWrap: "wrap", gap: 6 }}>
-              <button className="btn btn-o btn-sm" onClick={() => addEdgeSeg("start", "hem")}>+ Hem @ Start</button>
-              <button className="btn btn-o btn-sm" onClick={() => addEdgeSeg("start", "kick")}>+ Kick @ Start</button>
-              <button className="btn btn-o btn-sm" onClick={() => addEdgeSeg("end", "hem")}>+ Hem @ End</button>
-              <button className="btn btn-o btn-sm" onClick={() => addEdgeSeg("end", "kick")}>+ Kick @ End</button>
+            <label>Edge Options — kick + hem</label>
+            <div className="row" style={{ flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+              <span style={{ fontSize: 12, color: "var(--mut)" }}>Kick (in)</span>
+              <input type="number" min="0" max="4" step="0.125" value={edgeKick} onChange={(e) => setEdgeKick(e.target.value)} style={{ width: 74, padding: "6px 8px" }} />
+              <span style={{ fontSize: 12, color: "var(--mut)" }}>Hem (in)</span>
+              <input type="number" min="0" max="4" step="0.125" value={edgeHem} onChange={(e) => setEdgeHem(e.target.value)} style={{ width: 74, padding: "6px 8px" }} />
+              <button className="btn btn-o btn-sm" onClick={() => addEdges("start")}>{IC.plus}&nbsp;Add @ Start</button>
+              <button className="btn btn-o btn-sm" onClick={() => addEdges("end")}>{IC.plus}&nbsp;Add @ End</button>
             </div>
             <div style={{ fontSize: 12, color: "var(--mut)", marginTop: 4 }}>
-              Adds an editable ½" segment — hems fold back ~170°, kicks flare 35°. If one folds the wrong way, flip the sign of its angle in the rows above.
+              One click adds the kick (35° flare) then the hem (~170° fold) as editable segments — set either size to 0 to skip it. If a fold lands the wrong way, flip the sign of its angle in the rows above.
             </div>
           </div>
         )}
