@@ -336,6 +336,11 @@ export const anyMat = (c) => MATERIALS.find((m) => m.code === c) || membraneStyl
 export const matByCode = anyMat;
 
 const rad = (deg) => (deg * Math.PI) / 180;
+// Does either coping bottom edge include a kick? (legacy parts stored a single `edge`)
+const hasCopingKick = (p) => {
+  const legacy = p.edge ?? "kick";
+  return String(p.frontEdge ?? legacy).includes("kick") || String(p.backEdge ?? legacy).includes("kick");
+};
 
 // ─── Gutter drop outlet sizes (square or round) — referenced by the builder type below ───
 export const DROP_OUTLET_SIZES = [
@@ -424,42 +429,63 @@ export const FLASHING_TYPES = [
       { key: "width", label: "Wall Width (in)", def: 12, min: 4, max: 30 },
       { key: "front", label: "Front Face (in)", def: 4, min: 1, max: 12 },
       { key: "back", label: "Back Face (in)", def: 3, min: 1, max: 12 },
-      { key: "faceAngle", label: "Front Face Bend (°, 90 = plumb)", def: 90, min: 45, max: 135, step: 1 },
-      { key: "backAngle", label: "Back Face Bend (°, 90 = plumb)", def: 90, min: 45, max: 135, step: 1 },
-      { key: "kick", label: "Kick-Out (in)", def: 0.5, min: 0.25, max: 2, step: 0.25 },
-      { key: "kickAngle", label: "Kick Angle (°)", def: 45, min: 15, max: 75, step: 5 },
-      { key: "edge", label: "Bottom Edge", type: "choice", def: "kick", options: [{ value: "kick", label: "Kick only" }, { value: "hemkick", label: "Hem + Kick" }] },
+      { key: "faceAngle", label: "Front Face Bend (°, 90 = square to top)", def: 90, min: 45, max: 135, step: 1 },
+      { key: "backAngle", label: "Back Face Bend (°, 90 = square to top)", def: 90, min: 45, max: 135, step: 1 },
+      { key: "kick", label: "Kick-Out (in)", def: 0.5, min: 0.25, max: 2, step: 0.25, showIf: hasCopingKick },
+      { key: "kickAngle", label: "Kick Angle (°)", def: 45, min: 15, max: 75, step: 5, showIf: hasCopingKick },
+      { key: "frontEdge", label: "Front Bottom Edge", type: "choice", def: "kick", options: [
+        { value: "kick", label: "Kick only" }, { value: "hemkick", label: "Hem + Kick" },
+        { value: "hem", label: "Hem only" }, { value: "raw", label: "Plain (no kick / hem)" },
+      ] },
+      { key: "backEdge", label: "Back Bottom Edge", type: "choice", def: "kick", options: [
+        { value: "kick", label: "Kick only" }, { value: "hemkick", label: "Hem + Kick" },
+        { value: "hem", label: "Hem only" }, { value: "raw", label: "Plain (no kick / hem)" },
+      ] },
       { key: "cleat", label: "Cleat", type: "choice", def: "full", options: [{ value: "full", label: "Full-length cleat" }, { value: "segmented", label: "Segmented cleats" }, { value: "none", label: "No cleat" }] },
+      { key: "cleatLen", label: "Segmented Cleat Length (in)", def: 12, min: 2, max: 60, step: 1, showIf: (p) => p.cleat === "segmented" },
       { key: "splice", label: "Splice Plates", type: "choice", def: "yes", options: [{ value: "yes", label: "Include splice plates" }, { value: "no", label: "No splice plates" }] },
     ],
     points: (p) => {
       const slope = 0.6; // top slopes for drainage
+      const hl = 0.5;    // hemmed return length
       const ka = rad(p.kickAngle ?? 45);
       const kick = p.kick ?? 0.5;
-      const hem = p.edge === "hemkick";
-      const hl = 0.5; // hemmed return length
-      // Face bend deviation from plumb: >90° splays the face out, <90° tucks it in.
-      const fd = rad((p.faceAngle ?? 90) - 90);
-      const bd = rad((p.backAngle ?? 90) - 90);
+      // Per-side bottom edges; old saved parts carry the single legacy `edge` value.
+      const legacy = p.edge ?? "kick";
+      const fe = p.frontEdge ?? legacy;
+      const be = p.backEdge ?? legacy;
+      // Face bends are the INCLUDED angle between the sloped top and the face —
+      // the actual brake bend — so the drawing marks exactly the number typed.
+      const t = Math.atan2(slope, p.width || 12);
+      const fDir = t + rad(p.faceAngle ?? 90);
+      const bDir = t + Math.PI - rad(p.backAngle ?? 90);
+      const fEnd = [Math.cos(fDir) * p.front, Math.sin(fDir) * p.front];
+      const bEnd = [p.width + Math.cos(bDir) * p.back, slope + Math.sin(bDir) * p.back];
+      const fKick = [fEnd[0] + Math.cos(fDir + ka) * kick, fEnd[1] + Math.sin(fDir + ka) * kick];
+      const bKick = [bEnd[0] + Math.cos(bDir - ka) * kick, bEnd[1] + Math.sin(bDir - ka) * kick];
       const pts = [];
-      // front face (left, from [0,0]) — hangs at its bend angle, kick continues OUT from the face
-      const fEnd = [-Math.sin(fd) * p.front, Math.cos(fd) * p.front];
-      const fKick = [fEnd[0] - Math.sin(fd + ka) * kick, fEnd[1] + Math.cos(fd + ka) * kick];
-      if (hem) pts.push([fKick[0] + hl, fKick[1]]); // folded return tucked under the kick
-      pts.push(fKick, fEnd, [0, 0], [p.width, slope]);
-      // back face (right, from [width, slope]) — its own bend angle, kick OUT (+x)
-      const bEnd = [p.width + Math.sin(bd) * p.back, slope + Math.cos(bd) * p.back];
-      const bKick = [bEnd[0] + Math.sin(bd + ka) * kick, bEnd[1] + Math.cos(bd + ka) * kick];
-      pts.push(bEnd, bKick);
-      if (hem) pts.push([bKick[0] - hl, bKick[1]]);
+      if (fe === "hemkick") pts.push([fKick[0] + hl, fKick[1]], fKick);
+      else if (fe === "kick") pts.push(fKick);
+      else if (fe === "hem") pts.push([fEnd[0] + hl, fEnd[1]]);
+      pts.push(fEnd, [0, 0], [p.width, slope], bEnd);
+      if (be === "hemkick") pts.push(bKick, [bKick[0] - hl, bKick[1]]);
+      else if (be === "kick") pts.push(bKick);
+      else if (be === "hem") pts.push([bEnd[0] - hl, bEnd[1]]);
       return pts;
     },
-    dims: (p) => `${p.width}" wall, ${p.front}"/${p.back}" faces` +
-      ((p.faceAngle ?? 90) !== 90 ? `, front face @ ${p.faceAngle}°` : "") +
-      ((p.backAngle ?? 90) !== 90 ? `, back face @ ${p.backAngle}°` : "") +
-      `, ${p.kick ?? 0.5}" kick-out @ ${p.kickAngle ?? 45}°${p.edge === "hemkick" ? ", hemmed" : ""}` +
-      (p.cleat === "segmented" ? ", segmented cleats" : p.cleat === "none" ? "" : ", full-length cleat") +
-      (p.splice === "no" ? "" : ", splice plates"),
+    dims: (p) => {
+      const legacy = p.edge ?? "kick";
+      const fe = p.frontEdge ?? legacy, be = p.backEdge ?? legacy;
+      const eTxt = (m) => (m === "hemkick" ? "hem+kick" : m === "hem" ? "hem" : m === "raw" ? "plain" : "kick");
+      const hasKick = String(fe).includes("kick") || String(be).includes("kick");
+      return `${p.width}" wall, ${p.front}"/${p.back}" faces` +
+        ((p.faceAngle ?? 90) !== 90 ? `, front face @ ${p.faceAngle}°` : "") +
+        ((p.backAngle ?? 90) !== 90 ? `, back face @ ${p.backAngle}°` : "") +
+        `, front edge ${eTxt(fe)}, back edge ${eTxt(be)}` +
+        (hasKick ? ` (${p.kick ?? 0.5}" kick @ ${p.kickAngle ?? 45}°)` : "") +
+        (p.cleat === "segmented" ? `, segmented ${p.cleatLen ?? 12}" cleats` : p.cleat === "none" ? "" : ", full-length cleat") +
+        (p.splice === "no" ? "" : ", splice plates");
+    },
   },
   {
     id: "boxGutter",

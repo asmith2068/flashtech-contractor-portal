@@ -274,9 +274,10 @@ function shopSheet(part, info, label = null) {
     }).join("");
     geomRows += `<tr><td><b>Stretch-out</b></td><td class="r"><b>${customProfileStretch(p.segs || [])}"</b></td><td class="r">${Math.max(0, (p.segs || []).length - 1)} bends</td></tr>`;
   } else {
-    geomRows = (t.fields || []).map((f) => {
-      const v = p[f.key];
-      const label2 = f.type === "choice" ? ((f.options.find((o) => o.value === v) || {}).label || v) : `${v}${String(f.label).includes("(°)") ? "°" : '"'}`;
+    geomRows = (t.fields || []).filter((f) => !f.showIf || f.showIf(p)).map((f) => {
+      // legacy coping parts saved a single `edge`; newer fields fall back to their default
+      const v = p[f.key] ?? ((f.key === "frontEdge" || f.key === "backEdge") ? (p.edge ?? f.def) : f.def);
+      const label2 = f.type === "choice" ? ((f.options.find((o) => o.value === v) || {}).label || v) : `${v}${String(f.label).includes("°") ? "°" : '"'}`;
       return `<tr><td>${escH(f.label)}</td><td class="r" colspan="2">${escH(label2)}</td></tr>`;
     }).join("");
     if (part.girth) geomRows += `<tr><td><b>Stretch-out</b></td><td class="r" colspan="2"><b>${part.girth}"</b>${part.bends ? ` · ${part.bends} bends` : ""}</td></tr>`;
@@ -1304,9 +1305,12 @@ function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc =
       const d = editItem.detail;
       if (!typeById(d.flashing_type)) return;
       setTypeId(d.flashing_type);
-      setParams({ ...defaultParams(d.flashing_type), ...(d.params || {}) });
+      const merged = { ...defaultParams(d.flashing_type), ...(d.params || {}) };
+      // legacy coping items stored a single `edge` — map it onto both sides
+      if (d.flashing_type === "coping" && d.params?.edge && !d.params.frontEdge) { merged.frontEdge = d.params.edge; merged.backEdge = d.params.edge; }
+      setParams(merged);
       setMatCode(d.material_code || "G26");
-      if (d.piece_length_ft) setLenFt(d.piece_length_ft);
+      if (d.piece_length_ft) setLenFt(Math.min(10, d.piece_length_ft));
       setPieces(editItem.qty || 1);
       setEditKey(editItem.key);
       setSaved(""); setDrawMode(false); setProfView("2d"); setHowToSeen(true);
@@ -1406,7 +1410,7 @@ function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc =
             </div>
           </div>
         )}
-        {t.fields.map((f) => (
+        {t.fields.filter((f) => !f.showIf || f.showIf(vp)).map((f) => (
           <div className="fld" key={f.key}>
             <label>{f.label}</label>
             {f.type === "choice"
@@ -1433,7 +1437,7 @@ function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc =
             <div className="fld"><label>Piece Length (ft)</label>
               {isCustom || t.fixedLen
                 ? <input value={`${t.fixedLen || 10}'-0"`} disabled title={t.fixedLen ? `${t.name} comes in ${t.fixedLen}' sections` : "Custom profiles are priced per 10' piece"} />
-                : <select value={lenFt} onChange={(e) => setLenFt(parseFloat(e.target.value))}>{[8, 10, 12].map((l) => <option key={l} value={l}>{l}'-0"</option>)}</select>}
+                : <select value={lenFt} onChange={(e) => setLenFt(parseFloat(e.target.value))}>{[8, 10].map((l) => <option key={l} value={l}>{l}'-0"</option>)}</select>}
             </div>
             <div className="fld"><label># of Pieces</label>
               <input type="number" min="1" value={pieces} onChange={(e) => setPieces(Math.max(1, parseInt(e.target.value) || 1))} />
