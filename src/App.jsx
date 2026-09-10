@@ -8,7 +8,7 @@ import {
   profileGirth, profileBends, piecePrice, customPartNumber, customDescription, defaultParams,
   membranePrice, membranePartNumber, membraneDescription,
   scupperPrice, scupperPartNumber, scupperSides, scupperTier, productImage, POPULAR_SKUS,
-  customProfilePoints, customProfileStretch, panPrice, panPartNumber, panDescription, panBlank, partDXF,
+  customProfilePoints, customProfileStretch, matThickness, FOLDER_IR, FOLDER_K, panPrice, panPartNumber, panDescription, panBlank, partDXF,
   DRAWINGS, drawingsByCategory, copingExtras, DATASHEETS,
   PRICING, applyPricing, categoryAdjust, categoryPct,
   gutterExtras, outletPrice, outletPartNumber, outletDescription, outletSize,
@@ -134,7 +134,7 @@ button{margin-bottom:18px;padding:9px 18px;background:#0aa810;color:#fff;border:
 // angle marked with an arc at every bend — a real fabrication drawing. All
 // values are derived from the same point list that drives pricing and the DXF,
 // so what's printed is exactly what gets braked.
-function ProfileDrawing({ points, letters = null, height = 400 }) {
+function ProfileDrawing({ points, letters = null, height = 400, thickness = 0.024 }) {
   if (!points || points.length < 2) return null;
   const xs = points.map((p) => p[0]), ys = points.map((p) => p[1]);
   const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
@@ -143,7 +143,26 @@ function ProfileDrawing({ points, letters = null, height = 400 }) {
   const vb = `${minX - pad} ${minY - pad} ${maxX - minX + pad * 2} ${maxY - minY + pad * 2}`;
   const fs = span / 15;                       // label font size (viewBox = inches)
   const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
-  const path = points.map((p, i) => `${i ? "L" : "M"}${p[0]},${p[1]}`).join(" ");
+  // The metal is drawn at its actual gauge thickness (floored so it stays visible on
+  // wide profiles) and every bend is filleted at the folder's radius. Dimensions and
+  // angle arcs still reference the sharp apex — that's what the operator sets to.
+  const bw = Math.max(thickness, span / 150);
+  const rc = Math.max(FOLDER_IR + thickness / 2, bw * 0.75); // centerline bend radius
+  let path = `M${points[0][0]},${points[0][1]}`;
+  for (let i = 1; i < points.length - 1; i++) {
+    const [px, py] = points[i], [ax, ay] = points[i - 1], [bx, by] = points[i + 1];
+    const l1 = Math.hypot(px - ax, py - ay), l2 = Math.hypot(bx - px, by - py);
+    if (l1 < 0.05 || l2 < 0.05) { path += `L${px},${py}`; continue; }
+    const u1 = [(px - ax) / l1, (py - ay) / l1], u2 = [(bx - px) / l2, (by - py) / l2];
+    const cross = u1[0] * u2[1] - u1[1] * u2[0], dot = u1[0] * u2[0] + u1[1] * u2[1];
+    const theta = Math.atan2(Math.abs(cross), dot); // deviation from straight, 0..π
+    if (theta < 0.03) { path += `L${px},${py}`; continue; }
+    const T = Math.min(rc * Math.tan(theta / 2), l1 * 0.45, l2 * 0.45);
+    const rEff = T / Math.tan(theta / 2);
+    path += `L${px - u1[0] * T},${py - u1[1] * T}`;
+    path += `A${rEff},${rEff} 0 0 ${cross > 0 ? 1 : 0} ${px + u2[0] * T},${py + u2[1] * T}`;
+  }
+  path += `L${points[points.length - 1][0]},${points[points.length - 1][1]}`;
   const dims = [], arcs = [];
 
   // Segment length callouts, offset to the outside of the profile with a leader tick.
@@ -198,8 +217,8 @@ function ProfileDrawing({ points, letters = null, height = 400 }) {
 
   return (
     <svg viewBox={vb} style={{ width: "100%", height, display: "block", background: "#fff" }} preserveAspectRatio="xMidYMid meet">
-      <path d={path} fill="none" stroke="#c9ced2" strokeWidth={span / 34} strokeLinecap="round" strokeLinejoin="round" />
-      <path d={path} fill="none" stroke="#15191c" strokeWidth={span / 90} strokeLinecap="round" strokeLinejoin="round" />
+      <path d={path} fill="none" stroke="#c9ced2" strokeWidth={bw * 3.2} strokeLinecap="round" strokeLinejoin="round" />
+      <path d={path} fill="none" stroke="#15191c" strokeWidth={bw} strokeLinecap="round" strokeLinejoin="round" />
       {points.map((p, i) => <circle key={i} cx={p[0]} cy={p[1]} r={span / 130} fill="#15191c" />)}
       {arcs}
       {dims}
@@ -272,7 +291,8 @@ function shopSheet(part, info, label = null) {
       const ang = i === 0 ? (parseFloat(s.ang) ? `start ${s.ang}°` : "—") : `${s.ang}° bend`;
       return `<tr><td>Segment ${U}</td><td class="r">${Math.round((parseFloat(s.len) || 0) * 100) / 100}"</td><td class="r">${ang}</td></tr>`;
     }).join("");
-    geomRows += `<tr><td><b>Stretch-out</b></td><td class="r"><b>${customProfileStretch(p.segs || [])}"</b></td><td class="r">${Math.max(0, (p.segs || []).length - 1)} bends</td></tr>`;
+    geomRows += `<tr><td><b>Stretch-out (flat)</b></td><td class="r"><b>${customProfileStretch(p.segs || [], part.material_code)}"</b></td><td class="r">${Math.max(0, (p.segs || []).length - 1)} bends</td></tr>`;
+    geomRows += `<tr><td colspan="3" style="font-size:9px;color:#667">Flat allows for bend radius — Roper Whitney folder, IR ${FOLDER_IR}", K ${FOLDER_K}, ${matThickness(part.material_code)}" material</td></tr>`;
   } else {
     geomRows = (t.fields || []).filter((f) => !f.showIf || f.showIf(p)).map((f) => {
       // legacy coping parts saved a single `edge`; newer fields fall back to their default
@@ -292,7 +312,7 @@ function shopSheet(part, info, label = null) {
     try {
       const pts = t.custom ? customProfilePoints(p.segs || []) : t.points(p);
       const letters = t.letters ? t.letters(p) : (t.custom ? (p.segs || []).map((_, i) => String.fromCharCode(65 + i)) : null);
-      const prof = renderToStaticMarkup(<ProfileDrawing points={pts} letters={letters} height={540} />);
+      const prof = renderToStaticMarkup(<ProfileDrawing points={pts} letters={letters} height={540} thickness={matThickness(part.material_code)} />);
       const iso = partPreviewSvg(part, 320, false);
       stage = `<div style="display:flex;gap:16px;align-items:center;justify-content:center;flex-wrap:wrap">
 <div style="flex:1 1 520px;min-width:380px">${prof}<div class="cap">Profile — cross-section · lengths in inches · bend angles shown included</div></div>
@@ -1218,7 +1238,8 @@ function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc =
   const effLen = isCustom || t.fixedLen ? (t.fixedLen || 10) : lenFt;
   const hasProfile = isSheet && !isPan && !isOutlet;
   const pts = useMemo(() => (hasProfile ? t.points(vp) : []), [hasProfile, t, vp]);
-  const girth = hasProfile ? profileGirth(pts) : 0;
+  // Custom drawn profiles: flat stretch-out with the folder's bend deduction (gauge-aware).
+  const girth = hasProfile ? (isCustom ? customProfileStretch(vp.segs || [], matCode) : profileGirth(pts)) : 0;
   const bends = hasProfile ? profileBends(pts) : 0;
   // revolved geometry path (single-ply membrane parts + metal drop outlets)
   const geo = useMemo(() => (t.geometry ? t.geometry(vp) : null), [t, vp]);

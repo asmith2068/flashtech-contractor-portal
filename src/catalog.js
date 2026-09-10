@@ -727,6 +727,31 @@ export const profileGirth = (pts) => {
 };
 export const profileBends = (pts) => Math.max(0, pts.length - 2);
 
+// ─── Bend physics — Roper Whitney folder (same numbers the shop's DXF flats use) ───
+export const FOLDER_IR = 0.050; // inside bend radius the folder's nose produces (in)
+export const FOLDER_K = 0.42;   // K-factor (neutral-axis position) for the folder
+// Nominal material thickness (in) by base material code. Clad materials use the
+// 24ga steel core — the membrane doesn't move the neutral axis meaningfully.
+export const MAT_THICKNESS = {
+  G26: 0.0179, G24: 0.0239, G22: 0.0299,
+  B26: 0.0179, B24: 0.0239, B22: 0.0299,
+  KYN24: 0.0239, KYN22: 0.0299,
+  SS24: 0.0250, SS22: 0.0313,
+  CU16: 0.0216, CU20: 0.0270,
+  TPOC: 0.0239, PVCC: 0.0239,
+};
+export const matThickness = (matCode) => MAT_THICKNESS[String(matCode || "").split("-")[0]] ?? 0.024;
+// Bend deduction for one bend of `thetaDeg` deviation (0 = straight): how much
+// shorter the flat is than the two apex-measured flange lengths. Negative for
+// near-hems (the fold consumes extra material) — that's physical, keep it.
+export const bendDeduction = (thetaDeg, t) => {
+  const th = Math.min(Math.abs(thetaDeg), 179);
+  if (th < 0.5) return 0;
+  const ossb = th <= 90 ? (FOLDER_IR + t) * Math.tan(rad(th) / 2) : (FOLDER_IR + t);
+  const ba = rad(th) * (FOLDER_IR + FOLDER_K * t);
+  return 2 * ossb - ba;
+};
+
 // ─── Custom drawn profile — segments [{len, ang}] traced as a polyline ───
 // ang = bend angle in degrees applied before the segment (first segment's is ignored).
 // Screen coords: x right, y down. Positive angle bends downward/clockwise; negative bends the other way.
@@ -743,8 +768,15 @@ export const customProfilePoints = (segs) => {
   });
   return pts;
 };
-export const customProfileStretch = (segs) =>
-  Math.round((segs || []).reduce((g, s) => g + Math.max(0, parseFloat(s.len) || 0), 0) * 100) / 100;
+// Flat stretch-out: segment lengths are measured to the sharp apex, so each bend's
+// deduction (per the folder's radius + K-factor) comes off the raw sum. Without a
+// material code this falls back to 24ga.
+export const customProfileStretch = (segs, matCode) => {
+  const t = matThickness(matCode);
+  let g = (segs || []).reduce((s, x) => s + Math.max(0, parseFloat(x.len) || 0), 0);
+  (segs || []).forEach((s, i) => { if (i > 0) g -= bendDeduction(parseFloat(s.ang) || 0, t); });
+  return Math.max(0, Math.round(g * 100) / 100);
+};
 export const customProfileDims = (segs) => (segs || []).map((s, i) => {
   const U = String.fromCharCode(65 + i);
   const len = Math.round((parseFloat(s.len) || 0) * 100) / 100;
