@@ -768,6 +768,34 @@ export const customProfilePoints = (segs) => {
   });
   return pts;
 };
+// Rendering variant of customProfilePoints: a near-180° bend (a closed hem) is drawn
+// as a real fold — the return leg jogs one hem-gap sideways (on the side the bend
+// turns toward) instead of overlapping the incoming leg. The extra jog vertex makes
+// this DISPLAY-ONLY: girth, bend counts and dims must keep using the exact points.
+export const customProfileRenderPoints = (segs, matCode) => {
+  const t = matThickness(matCode);
+  const gap = 2 * FOLDER_IR + t; // open-hem centerline separation off the folder
+  const pts = [[0, 0]];
+  let heading = (segs && segs[0] ? (parseFloat(segs[0].ang) || 0) : 0), x = 0, y = 0;
+  (segs || []).forEach((s, i) => {
+    const len = Math.max(0, parseFloat(s.len) || 0);
+    const ang = parseFloat(s.ang) || 0;
+    if (i > 0) {
+      const h0 = heading;
+      heading += ang;
+      if (Math.abs(ang) >= 176) {
+        const pr = rad(h0 + 90 * (ang >= 0 ? 1 : -1));
+        x += Math.cos(pr) * gap; y += Math.sin(pr) * gap;
+        pts.push([x, y]);
+      }
+    }
+    const r = rad(heading);
+    x += Math.cos(r) * len; y += Math.sin(r) * len;
+    pts.push([x, y]);
+  });
+  return pts;
+};
+
 // Flat stretch-out: segment lengths are measured to the sharp apex, so each bend's
 // deduction (per the folder's radius + K-factor) comes off the raw sum. Without a
 // material code this falls back to 24ga.

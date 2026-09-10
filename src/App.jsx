@@ -8,7 +8,7 @@ import {
   profileGirth, profileBends, piecePrice, customPartNumber, customDescription, defaultParams,
   membranePrice, membranePartNumber, membraneDescription,
   scupperPrice, scupperPartNumber, scupperSides, scupperTier, productImage, POPULAR_SKUS,
-  customProfilePoints, customProfileStretch, matThickness, FOLDER_IR, FOLDER_K, panPrice, panPartNumber, panDescription, panBlank, partDXF,
+  customProfilePoints, customProfileRenderPoints, customProfileStretch, matThickness, FOLDER_IR, FOLDER_K, panPrice, panPartNumber, panDescription, panBlank, partDXF,
   DRAWINGS, drawingsByCategory, copingExtras, DATASHEETS,
   PRICING, applyPricing, categoryAdjust, categoryPct,
   gutterExtras, outletPrice, outletPartNumber, outletDescription, outletSize,
@@ -134,9 +134,10 @@ button{margin-bottom:18px;padding:9px 18px;background:#0aa810;color:#fff;border:
 // angle marked with an arc at every bend — a real fabrication drawing. All
 // values are derived from the same point list that drives pricing and the DXF,
 // so what's printed is exactly what gets braked.
-function ProfileDrawing({ points, letters = null, height = 400, thickness = 0.024 }) {
+function ProfileDrawing({ points, letters = null, height = 400, thickness = 0.024, renderPoints = null }) {
   if (!points || points.length < 2) return null;
-  const xs = points.map((p) => p[0]), ys = points.map((p) => p[1]);
+  const rp = renderPoints && renderPoints.length > 1 ? renderPoints : points; // path only — dims stay on the exact points
+  const xs = points.concat(rp).map((p) => p[0]), ys = points.concat(rp).map((p) => p[1]);
   const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
   const span = Math.max(maxX - minX, maxY - minY, 1);
   const pad = span * 0.28 + 1.4;
@@ -148,21 +149,21 @@ function ProfileDrawing({ points, letters = null, height = 400, thickness = 0.02
   // angle arcs still reference the sharp apex — that's what the operator sets to.
   const bw = Math.max(thickness, span / 150);
   const rc = Math.max(FOLDER_IR + thickness / 2, bw * 0.75); // centerline bend radius
-  let path = `M${points[0][0]},${points[0][1]}`;
-  for (let i = 1; i < points.length - 1; i++) {
-    const [px, py] = points[i], [ax, ay] = points[i - 1], [bx, by] = points[i + 1];
+  let path = `M${rp[0][0]},${rp[0][1]}`;
+  for (let i = 1; i < rp.length - 1; i++) {
+    const [px, py] = rp[i], [ax, ay] = rp[i - 1], [bx, by] = rp[i + 1];
     const l1 = Math.hypot(px - ax, py - ay), l2 = Math.hypot(bx - px, by - py);
     if (l1 < 0.05 || l2 < 0.05) { path += `L${px},${py}`; continue; }
     const u1 = [(px - ax) / l1, (py - ay) / l1], u2 = [(bx - px) / l2, (by - py) / l2];
     const cross = u1[0] * u2[1] - u1[1] * u2[0], dot = u1[0] * u2[0] + u1[1] * u2[1];
     const theta = Math.atan2(Math.abs(cross), dot); // deviation from straight, 0..π
-    if (theta < 0.03) { path += `L${px},${py}`; continue; }
+    if (theta < 0.03 || theta > 3.05) { path += `L${px},${py}`; continue; } // straight or degenerate 180°
     const T = Math.min(rc * Math.tan(theta / 2), l1 * 0.45, l2 * 0.45);
     const rEff = T / Math.tan(theta / 2);
     path += `L${px - u1[0] * T},${py - u1[1] * T}`;
     path += `A${rEff},${rEff} 0 0 ${cross > 0 ? 1 : 0} ${px + u2[0] * T},${py + u2[1] * T}`;
   }
-  path += `L${points[points.length - 1][0]},${points[points.length - 1][1]}`;
+  path += `L${rp[rp.length - 1][0]},${rp[rp.length - 1][1]}`;
   const dims = [], arcs = [];
 
   // Segment length callouts, offset to the outside of the profile with a leader tick.
@@ -234,7 +235,7 @@ function partPreviewSvg(part, height = 380, showDims = true) {
     const isSheet = (t.kind || "sheet") === "sheet";
     if (t.pan) return renderToStaticMarkup(<Pan3D p={part.params} height={height} />);
     if (t.outlet || !isSheet) return renderToStaticMarkup(<SinglePly3D geo={t.geometry(part.params)} materialCode={part.material_code} split={!!(part.params || {}).split} height={height} />);
-    const pts = t.custom ? customProfilePoints((part.params || {}).segs || []) : t.points(part.params);
+    const pts = t.custom ? customProfileRenderPoints((part.params || {}).segs || [], part.material_code) : t.points(part.params);
     return renderToStaticMarkup(<Flashing3D points={pts} lengthFt={part.piece_length_ft || 10} materialCode={part.material_code} height={height} showDims={showDims} letters={showDims && t.letters ? t.letters(part.params) : null} />);
   } catch (e) { console.error("drawing preview failed", e); return ""; }
 }
@@ -312,7 +313,8 @@ function shopSheet(part, info, label = null) {
     try {
       const pts = t.custom ? customProfilePoints(p.segs || []) : t.points(p);
       const letters = t.letters ? t.letters(p) : (t.custom ? (p.segs || []).map((_, i) => String.fromCharCode(65 + i)) : null);
-      const prof = renderToStaticMarkup(<ProfileDrawing points={pts} letters={letters} height={540} thickness={matThickness(part.material_code)} />);
+      const rpts = t.custom ? customProfileRenderPoints(p.segs || [], part.material_code) : null;
+      const prof = renderToStaticMarkup(<ProfileDrawing points={pts} letters={letters} height={540} thickness={matThickness(part.material_code)} renderPoints={rpts} />);
       const iso = partPreviewSvg(part, 320, false);
       stage = `<div style="display:flex;gap:16px;align-items:center;justify-content:center;flex-wrap:wrap">
 <div style="flex:1 1 520px;min-width:380px">${prof}<div class="cap">Profile — cross-section · lengths in inches · bend angles shown included</div></div>
@@ -1524,7 +1526,7 @@ function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc =
             : isSheet
             ? (isCustom
                 ? (profView === "3d" && !drawMode
-                    ? <Flashing3D points={customProfilePoints(vp.segs || [])} lengthFt={10} materialCode={matCode} height={300} />
+                    ? <Flashing3D points={customProfileRenderPoints(vp.segs || [], matCode)} lengthFt={10} materialCode={matCode} height={300} />
                     : <ProfileCanvas segs={params.segs || []} onChange={(segs) => setParams((pp) => ({ ...pp, segs }))} drawMode={drawMode} onFinish={() => setDrawMode(false)} span={drawSpan} height={300} />)
                 : <Flashing3D points={pts} lengthFt={effLen} materialCode={matCode} height={300} letters={t.letters ? t.letters(vp) : null} />)
             : <SinglePly3D geo={geo} materialCode={matCode} split={split} height={300} />}
@@ -1602,7 +1604,7 @@ function MyPartsPage({ parts, onAdd, onDel, disc = (x) => x, user = null }) {
                 ? <Pan3D p={p.params} height={150} showLabels={false} />
                 : (t.outlet || !isSheet)
                 ? <SinglePly3D geo={t.geometry(p.params)} materialCode={p.material_code} split={!!p.params.split} height={150} />
-                : <Flashing3D points={t.custom ? customProfilePoints(p.params.segs || []) : t.points(p.params)} lengthFt={p.piece_length_ft} materialCode={p.material_code} height={150} showDims={false} />}
+                : <Flashing3D points={t.custom ? customProfileRenderPoints(p.params.segs || [], p.material_code) : t.points(p.params)} lengthFt={p.piece_length_ft} materialCode={p.material_code} height={150} showDims={false} />}
             </div>
             <div className="row" style={{ marginTop: 10, flexWrap: "wrap" }}>
               <input type="number" min="1" placeholder={eachLike ? "# each" : "# pieces"} style={{ width: 100 }} value={qty[p.id] || ""} onChange={(e) => setQty({ ...qty, [p.id]: e.target.value })} />
@@ -1892,7 +1894,7 @@ function RequestDetail({ req, items, msgs, role, contractor, user, onBack, onSen
                           ? <Pan3D p={i.detail.params} height={170} />
                           : (dt.outlet || !dSheet)
                           ? <SinglePly3D geo={dt.geometry(i.detail.params)} materialCode={i.detail.material_code} split={!!i.detail.params.split} height={170} />
-                          : <Flashing3D points={dt.points(i.detail.params)} lengthFt={i.detail.piece_length_ft} materialCode={i.detail.material_code} height={170} letters={dt.letters ? dt.letters(i.detail.params) : null} />}
+                          : <Flashing3D points={dt.custom ? customProfileRenderPoints(i.detail.params.segs || [], i.detail.material_code) : dt.points(i.detail.params)} lengthFt={i.detail.piece_length_ft} materialCode={i.detail.material_code} height={170} letters={dt.letters ? dt.letters(i.detail.params) : null} />}
                       </div>
                       {dxf && (
                         <button className="btn btn-o btn-sm" style={{ marginTop: 8 }}
