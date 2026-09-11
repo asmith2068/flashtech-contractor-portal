@@ -1790,7 +1790,7 @@ function CartPage({ cart, onRemove, onClear, onSubmit, busy, user, forCustomer =
 }
 
 // ─── REQUEST DETAIL (shared contractor/admin) ────────────────
-function RequestDetail({ req, items, msgs, role, contractor, user, onBack, onSend, onStatus, onQuoteTotal, onDelete, onSaveQuote, onQbQueue, onConvert, onRevert }) {
+function RequestDetail({ req, items, msgs, role, contractor, user, onBack, onSend, onStatus, onQuoteTotal, onDelete, onSaveQuote, onQbQueue, onConvert, onRevert, distPo = null, onSaveDistPo = null }) {
   const [body, setBody] = useState("");
   const [quote, setQuote] = useState(req.admin_quote_total || "");
   const [po, setPo] = useState(req.po_number || "");
@@ -1818,6 +1818,12 @@ function RequestDetail({ req, items, msgs, role, contractor, user, onBack, onSen
   const addLine = () => { if (!newItem.description.trim()) return; setRows((rs) => [...rs, { key: uid(), item_kind: "custom", sku: null, unit: "ea", description: newItem.description.trim(), qty: parseFloat(newItem.qty) || 1, unit_price: parseFloat(newItem.unit_price) || 0 }]); setNewItem({ description: "", qty: 1, unit_price: "" }); };
   const liveTotal = rows.reduce((s, r) => s + (parseFloat(r.qty) || 0) * (parseFloat(r.unit_price) || 0), 0);
   const saveEdit = async () => { const ok = await onSaveQuote(req, rows); if (ok !== false) setEditing(false); };
+  // ── distributor PO (staff-only; the customer never sees it) ──
+  const [dpo, setDpo] = useState(distPo?.po || "");
+  const [dpoNote, setDpoNote] = useState(distPo?.note || "");
+  const [dpoBusy, setDpoBusy] = useState(false);
+  useEffect(() => { setDpo(distPo?.po || ""); setDpoNote(distPo?.note || ""); }, [req.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const saveDpo = async () => { setDpoBusy(true); await onSaveDistPo(req, dpo, dpoNote); setDpoBusy(false); };
   return (
     <div>
       <div className="row" style={{ marginBottom: 14, justifyContent: "space-between" }}>
@@ -1844,7 +1850,7 @@ function RequestDetail({ req, items, msgs, role, contractor, user, onBack, onSen
             {req.needed_by && <> · Needed by {fmtDate(req.needed_by)}</>}
           </div>
           {req.notes && <div className="note" style={{ whiteSpace: "pre-line" }}>{req.notes}</div>}
-          {role === "admin" && !editing && <div className="row" style={{ marginBottom: 10 }}><button className="btn btn-p btn-sm" onClick={startEdit}>✏️&nbsp;Edit Quote / Pricing</button></div>}
+          {onSaveQuote && !editing && <div className="row" style={{ marginBottom: 10 }}><button className="btn btn-p btn-sm" onClick={startEdit}>✏️&nbsp;{role === "distributor" ? "Adjust Pricing" : "Edit Quote / Pricing"}</button></div>}
           {editing ? (
             <>
               <table><thead><tr><th>Description</th><th style={{ width: 58 }}>Qty</th><th style={{ width: 92 }}>Unit $</th><th>Total</th><th style={{ width: 34 }}></th></tr></thead>
@@ -1869,7 +1875,7 @@ function RequestDetail({ req, items, msgs, role, contractor, user, onBack, onSen
                 </tbody>
               </table>
               <div className="row" style={{ marginTop: 12 }}>
-                <button className="btn btn-p grow" style={{ justifyContent: "center" }} onClick={saveEdit}>{IC.send}&nbsp;Save &amp; Send Quote</button>
+                <button className="btn btn-p grow" style={{ justifyContent: "center" }} onClick={saveEdit}>{IC.send}&nbsp;{role === "distributor" ? "Save Pricing" : "Save & Send Quote"}</button>
                 <button className="btn btn-o" onClick={() => setEditing(false)}>Cancel</button>
               </div>
             </>
@@ -1998,6 +2004,25 @@ function RequestDetail({ req, items, msgs, role, contractor, user, onBack, onSen
             <div className="card" style={{ marginBottom: 14, borderLeft: "3px solid var(--grn)" }}>
               <b style={{ display: "block", marginBottom: 4 }}>✅ This is an order</b>
               <div style={{ fontSize: 13, color: "var(--mut)" }}>Flash-Tech is processing it{req.po_number ? <> under PO <b style={{ color: "var(--ink)" }}>{req.po_number}</b></> : ""}. Message us below with any changes.</div>
+            </div>
+          )}
+          {onSaveDistPo && (
+            <div className="card" style={{ marginBottom: 14, borderLeft: "3px solid #8b5cf6" }}>
+              <b style={{ display: "block", marginBottom: 4 }}>Distributor PO</b>
+              <div style={{ fontSize: 12, color: "var(--mut)", marginBottom: 10 }}>
+                Attached to this {req.req_type} for Flash-Tech's records — <b>the customer can't see it</b>.
+                {distPo?.at && <> Last saved {fmtDateTime(distPo.at)}.</>}
+              </div>
+              <div className="fld"><label>PO Number</label>
+                <input value={dpo} onChange={(e) => setDpo(e.target.value)} placeholder="Your PO #" />
+              </div>
+              <div className="fld"><label>Note (optional)</label>
+                <input value={dpoNote} onChange={(e) => setDpoNote(e.target.value)} placeholder="Billing / delivery notes for this PO" />
+              </div>
+              <div className="row" style={{ marginTop: 4 }}>
+                <button className="btn btn-p btn-sm grow" style={{ justifyContent: "center" }} disabled={dpoBusy} onClick={saveDpo}>{dpoBusy ? "Saving..." : distPo ? "Update PO" : "Attach PO"}</button>
+                {distPo && <button className="btn btn-o btn-sm" disabled={dpoBusy} onClick={async () => { setDpo(""); setDpoNote(""); setDpoBusy(true); await onSaveDistPo(req, "", ""); setDpoBusy(false); }}>Remove</button>}
+              </div>
             </div>
           )}
           <div className="card">
@@ -2697,6 +2722,7 @@ export default function App() {
   const [invites, setInvites] = useState([]); // distributor's customer sign-up PINs
   const [pricing, setPricing] = useState(null); // admin-saved GLOBAL pricing sheet
   const [custPricing, setCustPricing] = useState({}); // per-customer pricing sheets, keyed by contractor id
+  const [distPos, setDistPos] = useState({}); // distributor POs keyed by request id — staff only, never sent to contractors
   const [editSeed, setEditSeed] = useState({ item: null, nonce: 0 }); // cart line being edited in the builder
   const [actingId, setActingId] = useState(() => { try { return localStorage.getItem("ftp_acting") || ""; } catch { return ""; } }); // distributor: which customer they're working for
   const [menuOpen, setMenuOpen] = useState(false); // mobile slide-in nav drawer
@@ -2757,6 +2783,7 @@ export default function App() {
       // and the catalog applies its category % at display time for the same reason.
       setPricing(d.pricing || {});
       setCustPricing(d.pricingOverrides || {});
+      setDistPos(d.distPos || {});
       if (d.products?.length) setProducts(d.products);
       setRequests(d.requests || []);
       setItems(d.items || []);
@@ -2953,12 +2980,30 @@ export default function App() {
     try { total = (await api("saveQuote", { reqId: req.id, rows: editRows })).total; }
     catch (e) { alert("Could not save the quote: " + e.message); return false; }
     await loadAll(session);
-    flash("Quote saved & sent to the customer.");
     const c = contractorsById[req.contractor_id];
-    if (c?.email) sendMail(c.email, `Flash-Tech sent you a quote — ${fmt(total)}`,
-      emailShell("Your quote is ready", `<p>Flash-Tech has reviewed your request${req.job_name ? ` for <b>${req.job_name}</b>` : ""} and prepared a quote:</p><p style="font-size:24px;color:#0aa810;font-weight:bold">${fmt(total)}</p><p>Sign in to view the itemized quote and reply with any questions.</p>${mailBtn("View Quote", PORTAL_URL)}`),
-      NOTIFY_EMAIL);
+    if (isDist) {
+      // Distributor adjusted their customer's pricing — tell the customer it came
+      // from their distributor, not Flash-Tech, and don't mark the request answered.
+      flash("Pricing saved & sent to your customer.");
+      if (c?.email) sendMail(c.email, `${session.company || session.name} updated pricing on your ${req.req_type} — ${fmt(total)}`,
+        emailShell("Updated pricing", `<p><b>${session.company || session.name}</b> updated the pricing on your request${req.job_name ? ` for <b>${req.job_name}</b>` : ""}:</p><p style="font-size:24px;color:#0aa810;font-weight:bold">${fmt(total)}</p><p>Sign in to view the itemized quote and reply with any questions.</p>${mailBtn("View Quote", PORTAL_URL)}`));
+    } else {
+      flash("Quote saved & sent to the customer.");
+      if (c?.email) sendMail(c.email, `Flash-Tech sent you a quote — ${fmt(total)}`,
+        emailShell("Your quote is ready", `<p>Flash-Tech has reviewed your request${req.job_name ? ` for <b>${req.job_name}</b>` : ""} and prepared a quote:</p><p style="font-size:24px;color:#0aa810;font-weight:bold">${fmt(total)}</p><p>Sign in to view the itemized quote and reply with any questions.</p>${mailBtn("View Quote", PORTAL_URL)}`),
+        NOTIFY_EMAIL);
+    }
     return true;
+  };
+  // Distributor (or admin) attaches a PO to a request — stored server-side and never
+  // returned to the contractor. Blank removes it.
+  const saveDistPo = async (req, po, note) => {
+    try {
+      const r = await api("setDistPo", { reqId: req.id, po, note });
+      setDistPos((m) => { const n = { ...m }; if (r.removed) delete n[req.id]; else n[req.id] = r.distPo; return n; });
+      flash(r.removed ? "Distributor PO removed." : "Distributor PO saved.");
+      return true;
+    } catch (e) { alert("Could not save the PO: " + e.message); return false; }
   };
   // ── quote → order conversion ──
   // Either side can do it: the admin flips it from the request panel, or the
@@ -3257,7 +3302,8 @@ export default function App() {
           {page === "requests" && (curReq ? (
             <RequestDetail req={curReq} items={items} msgs={msgs} role={role}
               contractor={isAdmin || isDist ? contractorsById[curReq.contractor_id] : null} user={session}
-              onBack={() => setSelReq(null)} onSend={sendMsg} onStatus={setStatus} onQuoteTotal={setQuoteTotal} onDelete={isAdmin ? deleteRequest : null} onSaveQuote={isAdmin ? saveQuote : null} onQbQueue={isAdmin ? setQbQueue : null}
+              onBack={() => setSelReq(null)} onSend={sendMsg} onStatus={setStatus} onQuoteTotal={setQuoteTotal} onDelete={isAdmin ? deleteRequest : null} onSaveQuote={isAdmin || isDist ? saveQuote : null} onQbQueue={isAdmin ? setQbQueue : null}
+              distPo={isAdmin || isDist ? distPos[curReq.id] : null} onSaveDistPo={isAdmin || isDist ? saveDistPo : null}
               onConvert={convertToOrder} onRevert={isAdmin ? revertToQuote : null} />
           ) : (
             <RequestList requests={requests} msgs={msgs} role={role} contractorsById={contractorsById} onOpen={openRequest} onStatus={setStatus} onDelete={deleteRequest} initialStatus={reqFilter} />

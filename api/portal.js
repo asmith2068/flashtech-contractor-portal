@@ -89,17 +89,39 @@ async function getPricingOverrides() {
   return map;
 }
 
-async function sendResetEmail(to, link) {
+// Server-sent email (Resend). Wraps `inner` HTML in the branded shell; no-ops if
+// email isn't configured, and never throws — a failed email must not fail the action.
+async function sendServerEmail(to, subject, inner) {
   const key = process.env.RESEND_API_KEY;
-  if (!key) return;
-  const html = `<div style="font-family:Arial,Helvetica,sans-serif;background:#f2f3f2;padding:24px"><div style="max-width:520px;margin:0 auto;background:#fff;border:1px solid #e1e4e1"><div style="background:#000;padding:16px 22px;border-bottom:3px solid #0DD714;color:#0DD714;font-weight:bold;letter-spacing:.06em">FLASH-TECH</div><div style="padding:22px"><p style="margin:0 0 14px">We received a request to reset your Flash-Tech Portal password. This link is valid for 1 hour:</p><p><a href="${link}" style="display:inline-block;background:#0DD714;color:#000;font-weight:bold;padding:12px 22px;text-decoration:none">Reset My Password</a></p><p style="font-size:12px;color:#6a7278;margin-top:16px">If you didn't request this, you can safely ignore this email.</p></div></div></div>`;
+  if (!key || !to) return;
+  const html = `<div style="font-family:Arial,Helvetica,sans-serif;background:#f2f3f2;padding:24px"><div style="max-width:520px;margin:0 auto;background:#fff;border:1px solid #e1e4e1"><div style="background:#000;padding:16px 22px;border-bottom:3px solid #0DD714;color:#0DD714;font-weight:bold;letter-spacing:.06em">FLASH-TECH</div><div style="padding:22px">${inner}</div></div></div>`;
   try {
     await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from: process.env.EMAIL_FROM || "Flash-Tech Portal <onboarding@resend.dev>", to: [to], subject: "Reset your Flash-Tech password", html }),
+      body: JSON.stringify({ from: process.env.EMAIL_FROM || "Flash-Tech Portal <onboarding@resend.dev>", to: [to], subject, html }),
     });
   } catch { /* never block the request on email */ }
+}
+async function sendResetEmail(to, link) {
+  await sendServerEmail(to, "Reset your Flash-Tech password",
+    `<p style="margin:0 0 14px">We received a request to reset your Flash-Tech Portal password. This link is valid for 1 hour:</p><p><a href="${link}" style="display:inline-block;background:#0DD714;color:#000;font-weight:bold;padding:12px 22px;text-decoration:none">Reset My Password</a></p><p style="font-size:12px;color:#6a7278;margin-top:16px">If you didn't request this, you can safely ignore this email.</p>`);
+}
+
+// ─── Distributor PO — attached to a request by its distributor (or admin), NEVER
+// sent to the contractor. Stored as a hidden portal_products row (same zero-migration
+// pattern as pricing): sku "__DISTPO__<request uuid>", category _settings, active=false.
+const DISTPO_SKU = "__DISTPO__";
+async function getDistPos() {
+  const map = {};
+  try {
+    const { data } = await db.from("portal_products").select("sku,description").eq("category", "_settings").eq("active", false);
+    for (const r of data || []) {
+      if (!String(r.sku).startsWith(DISTPO_SKU)) continue;
+      try { map[r.sku.slice(DISTPO_SKU.length)] = JSON.parse(r.description); } catch { /* skip a bad row */ }
+    }
+  } catch { /* empty map */ }
+  return map;
 }
 
 export default async function handler(req, res) {
@@ -285,7 +307,14 @@ export default async function handler(req, res) {
           const all = await getPricingOverrides();
           if (all[a.id]) pricingOverrides[a.id] = all[a.id];
         }
-        return res.json({ user: clean(me), products: products || [], requests, items, messages, contractors, staff, parts, invites, pricing: await getPricing(), pricingOverrides });
+        // Distributor POs: staff-only — a contractor must never receive these.
+        let distPos = {};
+        if (a.role === "admin" || a.role === "distributor") {
+          const all = await getDistPos();
+          if (a.role === "admin") distPos = all;
+          else { const mine = new Set(requests.map((r) => r.id)); for (const [rid, v] of Object.entries(all)) if (mine.has(rid)) distPos[rid] = v; }
+        }
+        return res.json({ user: clean(me), products: products || [], requests, items, messages, contractors, staff, parts, invites, pricing: await getPricing(), pricingOverrides, distPos });
       }
 
       // ── admin: pricing (category %, builder %, per-inch stretch rates) ──
@@ -359,6 +388,18 @@ export default async function handler(req, res) {
           const { error: e2 } = await db.from("portal_request_items").insert(lines);
           if (e2) return res.status(400).json({ error: e2.message });
         }
+        // Notify the customer's distributor (server-side — the contractor's browser
+        // doesn't know the distributor's email). Skipped when the distributor placed
+        // the request themselves.
+        try {
+          const { data: buyer } = await db.from("portal_users").select("name,company,distributor_id").eq("id", buyerId).maybeSingle();
+          if (buyer?.distributor_id && a.id !== buyer.distributor_id) {
+            const { data: dist } = await db.from("portal_users").select("email").eq("id", buyer.distributor_id).maybeSingle();
+            const lbl = row.req_type === "order" ? "order" : "quote";
+            await sendServerEmail(dist?.email, `Your customer submitted a ${lbl} request — ${buyer.company || buyer.name}`,
+              `<p><b>${buyer.company || buyer.name}</b> submitted a ${lbl} request${row.job_name ? ` for <b>${row.job_name}</b>` : ""} — ${lines.length} item${lines.length === 1 ? "" : "s"}, estimated subtotal <b>$${Number(body.subtotal || 0).toFixed(2)}</b>.</p><p>Sign in to review it — you can adjust the price of each item and attach your PO before Flash-Tech processes it.</p><p><a href="https://flashtech-contractor-portal.vercel.app" style="display:inline-block;background:#0DD714;color:#000;font-weight:bold;padding:12px 22px;text-decoration:none">Open in Portal</a></p>`);
+          }
+        } catch { /* notification is best-effort */ }
         return res.json({ request });
       }
       case "sendMsg": {
@@ -385,8 +426,11 @@ export default async function handler(req, res) {
         return res.json({ ok: true });
       }
       case "saveQuote": {
-        // Admin edits the quote line-by-line: prices, quantities, added/removed lines.
-        needAdmin();
+        // Line-by-line quote editing: prices, quantities, added/removed lines.
+        // Admin on any request; a distributor on their own customers' requests
+        // (so they can set what their customer pays before Flash-Tech processes it).
+        const a = needStaff();
+        await reqInScope(a, body.reqId);
         const rows = (body.rows || []).map((r) => {
           const qty = Math.max(0, parseFloat(r.qty) || 0);
           const unit_price = Math.max(0, parseFloat(r.unit_price) || 0);
@@ -411,9 +455,33 @@ export default async function handler(req, res) {
           const { error } = await db.from("portal_request_items").insert(inserts);
           if (error) return res.status(400).json({ error: error.message });
         }
-        const { error } = await db.from("portal_requests").update({ admin_quote_total: total, status: "responded", updated_at: new Date().toISOString() }).eq("id", body.reqId);
+        // A distributor's price adjustment must not mark the request "responded" —
+        // that would clear it from Flash-Tech's needs-answer queue.
+        const patch = a.role === "admin"
+          ? { admin_quote_total: total, status: "responded", updated_at: new Date().toISOString() }
+          : { admin_quote_total: total, updated_at: new Date().toISOString() };
+        const { error } = await db.from("portal_requests").update(patch).eq("id", body.reqId);
         if (error) return res.status(400).json({ error: error.message });
         return res.json({ ok: true, total });
+      }
+      // Distributor PO: attached by the request's distributor (or admin), stored in a
+      // hidden row and NEVER returned to contractors. Empty po+note removes it.
+      case "setDistPo": {
+        const a = needStaff();
+        const rq = await reqInScope(a, body.reqId);
+        const po = String(body.po || "").trim().slice(0, 120);
+        const note = String(body.note || "").trim().slice(0, 500);
+        if (!po && !note) {
+          const { error } = await db.from("portal_products").delete().eq("sku", DISTPO_SKU + rq.id);
+          if (error) return res.status(400).json({ error: error.message });
+          return res.json({ ok: true, removed: true });
+        }
+        const payload = { po, note, by: a.id, at: new Date().toISOString() };
+        const { error } = await db.from("portal_products").upsert(
+          { sku: DISTPO_SKU + rq.id, category: "_settings", description: JSON.stringify(payload), unit: "ea", price: 0, active: false },
+          { onConflict: "sku" });
+        if (error) return res.status(400).json({ error: error.message });
+        return res.json({ ok: true, distPo: payload });
       }
       case "convertToOrder": {
         // Admin, the customer themselves, or their distributor may accept a quote.
@@ -447,6 +515,7 @@ export default async function handler(req, res) {
         needAdmin();
         await db.from("portal_messages").delete().eq("request_id", body.reqId);
         await db.from("portal_request_items").delete().eq("request_id", body.reqId);
+        await db.from("portal_products").delete().eq("sku", DISTPO_SKU + body.reqId); // its distributor PO, if any
         const { error } = await db.from("portal_requests").delete().eq("id", body.reqId);
         if (error) return res.status(400).json({ error: error.message });
         return res.json({ ok: true });
