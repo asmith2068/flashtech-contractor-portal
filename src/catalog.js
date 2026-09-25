@@ -562,6 +562,7 @@ export const FLASHING_TYPES = [
     name: "Gravel Stop / Fascia",
     fields: [
       { key: "lip", label: "Gravel Stop Lip (in)", def: 1, min: 0.5, max: 3, step: 0.25 },
+      { key: "lipAngle", label: "Lip Bend (°, 90 = square to face)", def: 90, min: 0, max: 135, step: 1, showIf: (p) => (p.lip ?? 1) > 0 && p.lipAngle != null },
       { key: "flange", label: "Roof Flange (in)", def: 3, min: 1, max: 12 },
       { key: "face", label: "Face (in)", def: 4, min: 1, max: 12 },
       { key: "cant", label: "Face Cant (°)", def: 12, min: 0, max: 45, step: 1 },
@@ -571,9 +572,18 @@ export const FLASHING_TYPES = [
       const c = rad(p.cant);
       const lip = p.lip ?? 1;
       const pts = [[p.flange, 0], [0, 0]];        // roof flange in to the outer edge
-      if (lip > 0) pts.push([0, -lip]);            // raised lip that retains gravel on the roof
-      const startY = lip > 0 ? -lip : 0;
-      const fx = -Math.sin(c) * p.face, fy = startY + Math.cos(c) * p.face;
+      // Lip return: held at lipAngle to the FACE (90 = square), so it tracks the
+      // cant instead of always dropping plumb. The bend at the deck follows
+      // automatically so the flange still lies flat. Legacy parts saved before
+      // lipAngle existed keep the old plumb riser.
+      let T = [0, 0];
+      if (lip > 0) {
+        const delta = p.lipAngle == null ? Math.PI / 2
+          : Math.max(0, Math.min(Math.PI / 2, rad(90 - p.lipAngle) + c)); // return's drop below horizontal; lipAngle = included angle vs the face
+        T = [-lip * Math.cos(delta), -lip * Math.sin(delta)];
+        pts.push(T);
+      }
+      const fx = T[0] - Math.sin(c) * p.face, fy = T[1] + Math.cos(c) * p.face;
       pts.push([fx, fy]);                          // down the fascia face
       if (p.kick > 0) {
         const k = rad(p.cant + 35);
@@ -581,7 +591,7 @@ export const FLASHING_TYPES = [
       }
       return pts;
     },
-    dims: (p) => `${p.lip ?? 1}" gravel lip, ${p.flange}" flange x ${p.face}" face @ ${p.cant}° cant`,
+    dims: (p) => `${p.lip ?? 1}" gravel lip${p.lipAngle != null ? ` @ ${p.lipAngle}° to face` : ""}, ${p.flange}" flange x ${p.face}" face @ ${p.cant}° cant`,
   },
   {
     id: "valley",

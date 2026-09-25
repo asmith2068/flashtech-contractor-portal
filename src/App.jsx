@@ -1331,6 +1331,8 @@ function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc =
       const merged = { ...defaultParams(d.flashing_type), ...(d.params || {}) };
       // legacy coping items stored a single `edge` — map it onto both sides
       if (d.flashing_type === "coping" && d.params?.edge && !d.params.frontEdge) { merged.frontEdge = d.params.edge; merged.backEdge = d.params.edge; }
+      // legacy gravel stops had a fixed plumb lip — map to the equivalent lip bend so editing doesn't reshape the part
+      if (d.flashing_type === "gravelStop" && d.params && d.params.lipAngle == null) merged.lipAngle = parseFloat(d.params.cant) || 0;
       setParams(merged);
       setMatCode(d.material_code || "G26");
       if (d.piece_length_ft) setLenFt(Math.min(10, d.piece_length_ft));
