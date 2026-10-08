@@ -91,7 +91,7 @@ async function getPricingOverrides() {
 
 // Server-sent email (Resend). Wraps `inner` HTML in the branded shell; no-ops if
 // email isn't configured, and never throws — a failed email must not fail the action.
-async function sendServerEmail(to, subject, inner) {
+async function sendServerEmail(to, subject, inner, replyTo) {
   const key = process.env.RESEND_API_KEY;
   if (!key || !to) return;
   const html = `<div style="font-family:Arial,Helvetica,sans-serif;background:#f2f3f2;padding:24px"><div style="max-width:520px;margin:0 auto;background:#fff;border:1px solid #e1e4e1"><div style="background:#000;padding:16px 22px;border-bottom:3px solid #0DD714;color:#0DD714;font-weight:bold;letter-spacing:.06em">FLASH-TECH</div><div style="padding:22px">${inner}</div></div></div>`;
@@ -99,7 +99,7 @@ async function sendServerEmail(to, subject, inner) {
     await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from: process.env.EMAIL_FROM || "Flash-Tech Portal <onboarding@resend.dev>", to: [to], subject, html }),
+      body: JSON.stringify({ from: process.env.EMAIL_FROM || "Flash-Tech Portal <onboarding@resend.dev>", to: [to], subject, html, ...(replyTo ? { reply_to: replyTo } : {}) }),
     });
   } catch { /* never block the request on email */ }
 }
@@ -234,6 +234,27 @@ export default async function handler(req, res) {
         const { data: u } = await db.from("portal_users").select("id,reset_expires").eq("reset_token", tok).maybeSingle();
         if (!u || !u.reset_expires || new Date(u.reset_expires) < new Date()) return res.status(400).json({ error: "This reset link is invalid or has expired." });
         await db.from("portal_users").update({ password_hash: sha256(pw), reset_token: null, reset_expires: null }).eq("id", u.id);
+        return res.json({ ok: true });
+      }
+      case "submitApplication": {
+        // Public employment application from the login page — no account needed.
+        // The application is emailed to Flash-Tech; nothing is stored.
+        if (String(body.website || "").trim()) return res.json({ ok: true }); // honeypot — bots fill it, humans never see it
+        const f = body.app || {};
+        const s = (v, max) => String(v || "").trim().slice(0, max);
+        const name = s(f.name, 120), phone = s(f.phone, 40), email = s(f.email, 160);
+        if (!name) return res.status(400).json({ error: "Please enter your name." });
+        if (!phone && !email) return res.status(400).json({ error: "Please give us a phone number or email so we can reach you." });
+        const row = (label, v) => (v ? `<tr><td style="padding:4px 10px 4px 0;color:#6a7278;white-space:nowrap;vertical-align:top">${label}</td><td style="padding:4px 0;white-space:pre-line">${v.replace(/</g, "&lt;")}</td></tr>` : "");
+        const inner = `<p style="margin:0 0 12px"><b>New employment application</b> submitted from the Contractor Portal login page.</p>
+<table style="font-size:14px;border-collapse:collapse">${
+  row("Name", name) + row("Phone", phone) + row("Email", email) + row("Address", s(f.address, 240)) +
+  row("Position", s(f.position, 80)) + row("Available", s(f.startDate, 60)) + row("Desired pay", s(f.pay, 60)) +
+  row("Authorized to work in the US", s(f.workAuth, 10)) +
+  row("Experience", s(f.experience, 2500)) + row("Skills / equipment", s(f.skills, 1500)) +
+  row("References", s(f.references, 1200)) + row("Heard about us via", s(f.heard, 200))
+}</table>`;
+        await sendServerEmail("asmith@flash-techinc.com", `Employment application — ${name}${f.position ? ` (${s(f.position, 80)})` : ""}`, inner, email || undefined);
         return res.json({ ok: true });
       }
       case "health": {

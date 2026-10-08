@@ -720,6 +720,7 @@ function LoginScreen({ onLogin, onGuest, dbError }) {
   const [forgot, setForgot] = useState(false);
   const [forgotEmail, setForgotEmail] = useState("");
   const [forgotMsg, setForgotMsg] = useState("");
+  const [applying, setApplying] = useState(false); // public employment-application modal
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
 
   const requestReset = async () => {
@@ -807,11 +808,87 @@ function LoginScreen({ onLogin, onGuest, dbError }) {
         <button className="btn btn-o" style={{ width: "100%", justifyContent: "center", marginTop: 10 }} onClick={onGuest}>
           {IC.wrench}&nbsp;Try the Custom Flashing Builder (no account)
         </button>
+        <button className="btn btn-o" style={{ width: "100%", justifyContent: "center", marginTop: 8 }} onClick={() => setApplying(true)}>
+          {IC.file}&nbsp;Employment Application — Join Our Team
+        </button>
+        {applying && <EmploymentAppModal onClose={() => setApplying(false)} />}
         <div style={{ marginTop: 14, fontSize: 12, color: "var(--mut)" }}>
           Flash-Tech staff: sign in with your admin account.
         </div>
       </div>
     </div>
+  );
+}
+
+// ─── EMPLOYMENT APPLICATION (public, from the login page) ────
+// Emailed to Flash-Tech by the server; nothing stored. No account needed.
+function EmploymentAppModal({ onClose }) {
+  const [f, setF] = useState({ name: "", phone: "", email: "", address: "", position: "Shop / Fabrication", startDate: "", pay: "", workAuth: "Yes", experience: "", skills: "", references: "", heard: "" });
+  const [hp, setHp] = useState(""); // honeypot — humans never see it
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [sent, setSent] = useState(false);
+  const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
+  const submit = async () => {
+    setErr("");
+    if (!f.name.trim()) { setErr("Please enter your name."); return; }
+    if (!f.phone.trim() && !f.email.trim()) { setErr("Please give us a phone number or email so we can reach you."); return; }
+    setBusy(true);
+    try { await api("submitApplication", { app: f, website: hp }); setSent(true); }
+    catch (e) { setErr(e.message || "Something went wrong — please try again or call us at (619) 334-9491."); }
+    setBusy(false);
+  };
+  return (
+    <Modal title="Employment Application — Flash-Tech Mfg, Inc." onClose={onClose}
+      footer={sent ? <button className="btn btn-p" onClick={onClose}>Done</button> : <>
+        <button className="btn btn-o" onClick={onClose}>Cancel</button>
+        <button className="btn btn-p" disabled={busy} onClick={submit}>{busy ? "Sending..." : "Submit Application"}</button>
+      </>}>
+      {sent ? (
+        <div className="note" style={{ borderLeft: "3px solid var(--grn)" }}>
+          <b>Application received — thank you!</b><br />
+          We'll review it and reach out if there's a fit. Questions? Call us at (619) 334-9491.
+        </div>
+      ) : (<>
+        <div style={{ fontSize: 13, color: "var(--mut)", marginBottom: 12 }}>
+          Sheet-metal fabrication shop in El Cajon, CA. Fill in what you can — name and a way to reach you are all that's required.
+        </div>
+        {err && <div className="err">{err}</div>}
+        <div className="g2">
+          <div className="fld"><label>Full Name *</label><input value={f.name} onChange={set("name")} placeholder="Your name" /></div>
+          <div className="fld"><label>Phone</label><input value={f.phone} onChange={set("phone")} placeholder="(619) 555-0123" /></div>
+        </div>
+        <div className="g2">
+          <div className="fld"><label>Email</label><input type="email" value={f.email} onChange={set("email")} placeholder="you@email.com" /></div>
+          <div className="fld"><label>City</label><input value={f.address} onChange={set("address")} placeholder="El Cajon, CA" /></div>
+        </div>
+        <input value={hp} onChange={(e) => setHp(e.target.value)} tabIndex={-1} autoComplete="off" aria-hidden="true" style={{ position: "absolute", left: "-9999px", width: 1, height: 1, opacity: 0 }} placeholder="website" />
+        <div className="g2">
+          <div className="fld"><label>Position</label>
+            <select value={f.position} onChange={set("position")}>
+              {["Shop / Fabrication", "Brake / Folder Operator", "Laser Operator", "Welder", "Driver / Delivery", "Office / Admin", "Sales", "Other"].map((p) => <option key={p}>{p}</option>)}
+            </select>
+          </div>
+          <div className="fld"><label>Available to Start</label><input value={f.startDate} onChange={set("startDate")} placeholder="e.g. Immediately, Nov 1" /></div>
+        </div>
+        <div className="g2">
+          <div className="fld"><label>Desired Pay (optional)</label><input value={f.pay} onChange={set("pay")} placeholder="$/hr" /></div>
+          <div className="fld"><label>Authorized to work in the US?</label>
+            <select value={f.workAuth} onChange={set("workAuth")}><option>Yes</option><option>No</option></select>
+          </div>
+        </div>
+        <div className="fld"><label>Work Experience</label>
+          <textarea rows={4} value={f.experience} onChange={set("experience")} placeholder="Most recent jobs — company, what you did, how long" style={{ width: "100%", resize: "vertical" }} />
+        </div>
+        <div className="fld"><label>Skills &amp; Equipment (optional)</label>
+          <textarea rows={2} value={f.skills} onChange={set("skills")} placeholder="Press brake, folder, laser, welding, roofing, forklift…" style={{ width: "100%", resize: "vertical" }} />
+        </div>
+        <div className="g2">
+          <div className="fld"><label>References (optional)</label><input value={f.references} onChange={set("references")} placeholder="Name & phone" /></div>
+          <div className="fld"><label>How did you hear about us?</label><input value={f.heard} onChange={set("heard")} placeholder="Friend, Indeed, drive-by…" /></div>
+        </div>
+      </>)}
+    </Modal>
   );
 }
 
