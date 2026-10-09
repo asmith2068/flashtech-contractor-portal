@@ -12,6 +12,7 @@ import {
   DRAWINGS, drawingsByCategory, copingExtras, DATASHEETS,
   PRICING, applyPricing, categoryAdjust, categoryPct,
   gutterExtras, outletPrice, outletPartNumber, outletDescription, outletSize,
+  jackPrice, jackPartNumber, jackDescription,
 } from "./catalog.js";
 
 // ─── UTILITIES ───────────────────────────────────────────────
@@ -234,7 +235,7 @@ function partPreviewSvg(part, height = 380, showDims = true) {
     const t = typeById(part.flashing_type);
     const isSheet = (t.kind || "sheet") === "sheet";
     if (t.pan) return renderToStaticMarkup(<Pan3D p={part.params} height={height} />);
-    if (t.outlet || !isSheet) return renderToStaticMarkup(<SinglePly3D geo={t.geometry(part.params)} materialCode={part.material_code} split={!!(part.params || {}).split} height={height} />);
+    if (t.outlet || t.jack || !isSheet) return renderToStaticMarkup(<SinglePly3D geo={t.geometry(part.params)} materialCode={part.material_code} split={!!(part.params || {}).split} height={height} />);
     const pts = t.custom ? customProfileRenderPoints((part.params || {}).segs || [], part.material_code) : t.points(part.params);
     return renderToStaticMarkup(<Flashing3D points={pts} lengthFt={part.piece_length_ft || 10} materialCode={part.material_code} height={height} showDims={showDims} letters={showDims && t.letters ? t.letters(part.params) : null} />);
   } catch (e) { console.error("drawing preview failed", e); return ""; }
@@ -303,12 +304,12 @@ function shopSheet(part, info, label = null) {
     }).join("");
     if (part.girth) geomRows += `<tr><td><b>Stretch-out</b></td><td class="r" colspan="2"><b>${part.girth}"</b>${part.bends ? ` · ${part.bends} bends` : ""}</td></tr>`;
   }
-  if (isSheet && !t.pan && !t.outlet) geomRows += `<tr><td>Piece length</td><td class="r" colspan="2">${part.piece_length_ft || 10}'-0"</td></tr>`;
+  if (isSheet && !t.pan && !t.outlet && !t.jack) geomRows += `<tr><td>Piece length</td><td class="r" colspan="2">${part.piece_length_ft || 10}'-0"</td></tr>`;
   // Main view: profile parts get a to-scale dimensioned 2D cross-section (every
   // length + bend angle marked on the drawing) with a small isometric beside it;
   // pans / outlets / membrane parts keep their 3D view.
   let stage = "";
-  const isProfile = isSheet && !t.pan && !t.outlet;
+  const isProfile = isSheet && !t.pan && !t.outlet && !t.jack;
   if (isProfile) {
     try {
       const pts = t.custom ? customProfilePoints(p.segs || []) : t.points(p);
@@ -366,7 +367,7 @@ const itemToPart = (i) => {
   const isSheet = (t.kind || "sheet") === "sheet";
   let bends = null;
   // Built-in profiles don't store a bend count; derive it from the point list.
-  try { if (!t.custom && isSheet && !t.pan && !t.outlet) bends = profileBends(t.points(d.params)); }
+  try { if (!t.custom && isSheet && !t.pan && !t.outlet && !t.jack) bends = profileBends(t.points(d.params)); }
   catch (e) { /* leave null rather than print a wrong number on a shop document */ }
   return {
     part_number: i.sku || "—",
@@ -1298,6 +1299,7 @@ function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc =
   const isCustom = isSheet && !!t.custom;
   const isPan = isSheet && !!t.pan;
   const isOutlet = isSheet && !!t.outlet;
+  const isJack = isSheet && !!t.jack;   // metal vent-pipe flashing — revolved, priced each
   const vp = useMemo(() => {
     const o = { ...params };
     for (const f of t.fields) {
@@ -1315,7 +1317,7 @@ function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc =
   // sheet-metal path. Custom drawn profiles + fixed-length types (box gutter) are priced per 10' piece.
   // Box/pan caps and drop outlets are priced each.
   const effLen = isCustom || t.fixedLen ? (t.fixedLen || 10) : lenFt;
-  const hasProfile = isSheet && !isPan && !isOutlet;
+  const hasProfile = isSheet && !isPan && !isOutlet && !isJack;
   const pts = useMemo(() => (hasProfile ? t.points(vp) : []), [hasProfile, t, vp]);
   // Custom drawn profiles: flat stretch-out with the folder's bend deduction (gauge-aware).
   const girth = hasProfile ? (isCustom ? customProfileStretch(vp.segs || [], matCode) : profileGirth(pts)) : 0;
@@ -1327,6 +1329,7 @@ function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc =
 
   const basePiece = isPan ? panPrice(vp, matCode)
     : isOutlet ? outletPrice(vp, matCode)
+    : isJack ? jackPrice(vp, matCode)
     : isSheet ? piecePrice(girth, bends, effLen, matCode)
     : isScupper ? scupperPrice(geo, matCode)
     : membranePrice(geo, matCode, split, vp.mil);
@@ -1337,11 +1340,13 @@ function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc =
   const perLF = (hasProfile && perPiece != null) ? Math.round((perPiece / effLen) * 100) / 100 : null;
   const partNo = isPan ? panPartNumber(matCode, vp)
     : isOutlet ? outletPartNumber(matCode, vp)
+    : isJack ? jackPartNumber(matCode, vp)
     : isSheet ? customPartNumber(typeId, matCode, girth)
     : isScupper ? scupperPartNumber(matCode, geo)
     : membranePartNumber(typeId, matCode, geo, split);
   const desc = isPan ? panDescription(matCode, vp)
     : isOutlet ? outletDescription(matCode, vp)
+    : isJack ? jackDescription(matCode, vp)
     : isSheet ? customDescription(typeId, matCode, vp, effLen, girth)
     : membraneDescription(typeId, matCode, vp, split);
   const total = perPiece == null ? null : Math.round(perPiece * pieces * 100) / 100;
@@ -1419,8 +1424,8 @@ function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc =
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editNonce]);
-  const custom = (isPan || isOutlet)
-    ? { part_number: partNo, name: name || (isPan ? `${t.name} ${vp.length}×${vp.width}×${vp.height}` : `${t.name} ${outletSize(vp.size).label}`), flashing_type: typeId, material_code: matCode, params: vp, girth: null, bends: null, piece_length_ft: null, price_per_piece: perPiece, description: desc }
+  const custom = (isPan || isOutlet || isJack)
+    ? { part_number: partNo, name: name || (isPan ? `${t.name} ${vp.length}×${vp.width}×${vp.height}` : isJack ? `${t.name} ${vp.pipeDia}"⌀ ${vp.pitch}:12` : `${t.name} ${outletSize(vp.size).label}`), flashing_type: typeId, material_code: matCode, params: vp, girth: null, bends: null, piece_length_ft: null, price_per_piece: perPiece, description: desc }
     : isSheet
     ? { part_number: partNo, name: name || `${t.name} ${girth}"`, flashing_type: typeId, material_code: matCode, params: vp, girth, bends, piece_length_ft: effLen, price_per_piece: perPiece, description: desc }
     : { part_number: partNo, name: name || `${split ? "Split " : ""}${t.name}`, flashing_type: typeId, material_code: matCode, params: vp, girth: null, bends: null, piece_length_ft: null, price_per_piece: perPiece, description: desc };
@@ -1530,7 +1535,7 @@ function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc =
             </div>
           </div>
         )}
-        {(isPan || isOutlet) ? (
+        {(isPan || isOutlet || isJack) ? (
           <div className="fld"><label>Quantity (each)</label>
             <input type="number" min="1" value={pieces} onChange={(e) => setPieces(Math.max(1, parseInt(e.target.value) || 1))} />
           </div>
@@ -1559,8 +1564,8 @@ function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc =
             <button className="btn btn-p" style={{ width: "100%", justifyContent: "center", marginBottom: 8 }}
               title="Print a title-blocked fabrication sheet for this part — no quote needed"
               onClick={() => setSubDraw(custom)}>{IC.file}&nbsp;Print Submittal Sheet</button>
-            {isSheet && !isOutlet && <button className="btn btn-o" style={{ width: "100%", justifyContent: "center" }} onClick={() => downloadDXF(`${partNo}.dxf`, partDXF(typeId, vp))}>{IC.print}&nbsp;Download DXF{isPan ? " (flat blank)" : " (profile)"}</button>}
-            {subDraw && <ShopDrawingModal part={subDraw} user={user} defaultQty={pieces ? `${pieces} ${isPan || isOutlet || !isSheet ? "ea" : "pcs"}` : ""} onClose={() => setSubDraw(null)} />}
+            {isSheet && !isOutlet && !isJack && <button className="btn btn-o" style={{ width: "100%", justifyContent: "center" }} onClick={() => downloadDXF(`${partNo}.dxf`, partDXF(typeId, vp))}>{IC.print}&nbsp;Download DXF{isPan ? " (flat blank)" : " (profile)"}</button>}
+            {subDraw && <ShopDrawingModal part={subDraw} user={user} defaultQty={pieces ? `${pieces} ${isPan || isOutlet || isJack || !isSheet ? "ea" : "pcs"}` : ""} onClose={() => setSubDraw(null)} />}
           </>
         ) : (
           <>
@@ -1600,7 +1605,7 @@ function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc =
         <div className="preview3d">
           {isPan
             ? <Pan3D p={vp} height={300} />
-            : isOutlet
+            : isOutlet || isJack
             ? <SinglePly3D geo={geo} materialCode={matCode} split={false} height={300} />
             : isSheet
             ? (isCustom
@@ -1620,6 +1625,11 @@ function BuilderPage({ guest, reference = false, onAddToCart, onSavePart, disc =
           </>) : isOutlet ? (<>
             <div><span>Outlet</span><b>{outletSize(vp.size).label}</b></div>
             <div><span>Drop</span><b>{vp.drop}"</b></div>
+            <div><span>Each</span><b>{priceTxt(perPiece)}</b></div>
+            <div><span>{pieces} each</span><b>{priceTxt(total)}</b></div>
+          </>) : isJack ? (<>
+            <div><span>Pipe ⌀ / Pitch</span><b>{vp.pipeDia}" @ {vp.pitch}:12</b></div>
+            <div><span>Flange</span><b>{vp.flange}"×{vp.flange}"</b></div>
             <div><span>Each</span><b>{priceTxt(perPiece)}</b></div>
             <div><span>{pieces} each</span><b>{priceTxt(total)}</b></div>
           </>) : isSheet ? (<>
@@ -1670,7 +1680,7 @@ function MyPartsPage({ parts, onAdd, onDel, disc = (x) => x, user = null }) {
       {parts.map((p) => {
         const t = typeById(p.flashing_type);
         const isSheet = (t.kind || "sheet") === "sheet";
-        const eachLike = t.pan || t.outlet || !isSheet;
+        const eachLike = t.pan || t.outlet || t.jack || !isSheet;
         return (
           <div className="card" key={p.id}>
             <div className="row" style={{ justifyContent: "space-between" }}>
@@ -1681,7 +1691,7 @@ function MyPartsPage({ parts, onAdd, onDel, disc = (x) => x, user = null }) {
             <div className="preview3d">
               {t.pan
                 ? <Pan3D p={p.params} height={150} showLabels={false} />
-                : (t.outlet || !isSheet)
+                : (t.outlet || t.jack || !isSheet)
                 ? <SinglePly3D geo={t.geometry(p.params)} materialCode={p.material_code} split={!!p.params.split} height={150} />
                 : <Flashing3D points={t.custom ? customProfileRenderPoints(p.params.segs || [], p.material_code) : t.points(p.params)} lengthFt={p.piece_length_ft} materialCode={p.material_code} height={150} showDims={false} />}
             </div>
@@ -1971,13 +1981,13 @@ function RequestDetail({ req, items, msgs, role, contractor, user, onBack, onSen
                   {i.item_kind === "custom" && i.detail?.params && (() => {
                     const dt = typeById(i.detail.flashing_type);
                     const dSheet = (dt.kind || "sheet") === "sheet";
-                    const dxf = role === "admin" && dSheet && !dt.outlet ? partDXF(i.detail.flashing_type, i.detail.params) : null;
+                    const dxf = role === "admin" && dSheet && !dt.outlet && !dt.jack ? partDXF(i.detail.flashing_type, i.detail.params) : null;
                     return (
                     <tr><td colSpan="4" style={{ background: "#f8fafc" }}>
                       <div className="preview3d" style={{ maxWidth: 420 }}>
                         {dt.pan
                           ? <Pan3D p={i.detail.params} height={170} />
-                          : (dt.outlet || !dSheet)
+                          : (dt.outlet || dt.jack || !dSheet)
                           ? <SinglePly3D geo={dt.geometry(i.detail.params)} materialCode={i.detail.material_code} split={!!i.detail.params.split} height={170} />
                           : <Flashing3D points={dt.custom ? customProfileRenderPoints(i.detail.params.segs || [], i.detail.material_code) : dt.points(i.detail.params)} lengthFt={i.detail.piece_length_ft} materialCode={i.detail.material_code} height={170} letters={dt.letters ? dt.letters(i.detail.params) : null} />}
                       </div>
@@ -2433,7 +2443,7 @@ const STRETCH_MATERIALS = [
   { code: "B26", label: "Bonderized 26ga" }, { code: "B24", label: "Bonderized 24ga" }, { code: "B22", label: "Bonderized 22ga" },
   { code: "KYN24", label: "Kynar 24ga" }, { code: "KYN22", label: "Kynar 22ga" },
   { code: "SS24", label: "Stainless 24ga" }, { code: "SS22", label: "Stainless 22ga" },
-  { code: "CU16", label: "Copper 16oz (~24ga)" }, { code: "CU20", label: "Copper 20oz (~22ga)" },
+  { code: "CU12", label: "Copper 12oz (~30ga)" }, { code: "CU16", label: "Copper 16oz (~24ga)" }, { code: "CU20", label: "Copper 20oz (~22ga)" },
   { code: "TPOC", label: "TPO-Clad Metal" }, { code: "PVCC", label: "PVC-Clad Metal" },
 ];
 function AdminPricing({ products, onSave, contractors = [], overrides = {}, onSaveCustomer = null }) {
@@ -2531,7 +2541,7 @@ function AdminPricing({ products, onSave, contractors = [], overrides = {}, onSa
         <div>
           <div className="card" style={{ marginBottom: 14 }}>
             <b style={{ display: "block", marginBottom: 4 }}>Custom Flashing Builder — %</b>
-            <div style={{ fontSize: 12, color: "var(--mut)", marginBottom: 10 }}>Applies to the flashing builder's each-priced parts: membrane boots &amp; wraps, scuppers, box/pan caps and gutter drop outlets. Metal profiles are priced by the per-inch rates instead.</div>
+            <div style={{ fontSize: 12, color: "var(--mut)", marginBottom: 10 }}>Applies to the flashing builder's each-priced parts: membrane boots &amp; wraps, scuppers, box/pan caps, gutter drop outlets and vent pipe flashings. Metal profiles are priced by the per-inch rates instead.</div>
             <select value={builderPct} onChange={(e) => setBuilderPct(parseInt(e.target.value))}>
               {PCT_OPTIONS.map((v) => <option key={v} value={v}>{pctLabel(v)}</option>)}
             </select>
@@ -2955,7 +2965,7 @@ export default function App() {
   const addCustom = (cf, pieces, replaceKey = null) => {
     const t = typeById(cf.flashing_type);
     const isSheet = (t.kind || "sheet") === "sheet";
-    const eachLike = t.pan || t.outlet || !isSheet;
+    const eachLike = t.pan || t.outlet || t.jack || !isSheet;
     const description = cf.description || (isSheet
       ? customDescription(cf.flashing_type, cf.material_code, cf.params, cf.piece_length_ft, cf.girth)
       : membraneDescription(cf.flashing_type, cf.material_code, cf.params, !!cf.params.split));

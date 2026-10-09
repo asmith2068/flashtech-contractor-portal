@@ -270,6 +270,7 @@ export const MATERIALS = [
   { code: "A40", name: 'Aluminum .040"', rate: 0.46, hue: 215, sat: 4, lum: 70 },
   // Bare-metal rates anchored to Galv 24ga sheet cost ($40 / 120×48): stainless = 2.5× ($100), copper = 8.75× ($350).
   // Copper is sold by weight: 16oz ≈ 24ga thickness, 20oz ≈ 22ga.
+  { code: "CU12", name: "Copper 12oz (~30ga)", rate: 2.10, hue: 22, sat: 58, lum: 50 },
   { code: "CU16", name: "Copper 16oz (~24ga)", rate: 2.80, hue: 22, sat: 60, lum: 48 },
   { code: "CU20", name: "Copper 20oz (~22ga)", rate: 3.40, hue: 22, sat: 62, lum: 45 },
   { code: "SS24", name: "Stainless 24ga", rate: 0.80, hue: 210, sat: 6, lum: 74 },
@@ -557,6 +558,29 @@ export const FLASHING_TYPES = [
     dims: (p) => `${outletSize(p.size).label}, ${p.drop}" drop, ${p.flange}" flange`,
   },
   {
+    id: "ventFlashing",
+    code: "VP",
+    name: "Vent Pipe Flashing (Pitched Roof)",
+    jack: true, // metal roof jack — revolved cone on a square flange, priced EACH
+    fields: [
+      { key: "pipeDia", label: "Pipe Diameter (in)", def: 3, min: 1, max: 12, step: 0.25 },
+      { key: "baseDia", label: "Cone Base Diameter (in)", def: 5, min: 1, max: 16, step: 0.5 },
+      { key: "height", label: "Height (in)", def: 8, min: 3, max: 18, step: 0.5 },
+      { key: "flange", label: "Flange Size (in, square)", def: 11, min: 6, max: 24, step: 0.5 },
+      { key: "pitch", label: "Roof Pitch (x : 12)", def: 4, min: 0, max: 12, step: 0.5 },
+    ],
+    geometry: (p) => ({
+      shape: "jack",
+      botR: Math.max(p.baseDia ?? 5, p.pipeDia) / 2,
+      topR: p.pipeDia / 2,
+      height: p.height,
+      half: (p.flange ?? 11) / 2,
+      tilt: Math.atan2(p.pitch ?? 4, 12) * 180 / Math.PI, // stack leans vs the roof plane by the pitch
+    }),
+    dims: (p) => `${p.pipeDia}"⌀ pipe, ${p.baseDia}"⌀ cone base, ${p.height}" tall, ${p.flange}"×${p.flange}" flange, ${p.pitch}:12 pitch`,
+    fits: (p) => `fits ${p.pipeDia}" pipe on a ${p.pitch}:12 roof`,
+  },
+  {
     id: "gravelStop",
     code: "GS",
     name: "Gravel Stop / Fascia",
@@ -747,7 +771,7 @@ export const MAT_THICKNESS = {
   B26: 0.0179, B24: 0.0239, B22: 0.0299,
   KYN24: 0.0239, KYN22: 0.0299,
   SS24: 0.0250, SS22: 0.0313,
-  CU16: 0.0216, CU20: 0.0270,
+  CU12: 0.0162, CU16: 0.0216, CU20: 0.0270,
   TPOC: 0.0239, PVCC: 0.0239,
 };
 export const matThickness = (matCode) => MAT_THICKNESS[String(matCode || "").split("-")[0]] ?? 0.024;
@@ -853,6 +877,7 @@ export const PRICING_DEFAULTS = {
     KYN22: 6.25, // Kynar 22ga (painted)
     SS24: 7.25,  // Stainless 24ga
     SS22: 8.25,  // Stainless 22ga
+    CU12: null,  // Copper 12oz — priced on request unless the admin sets a rate
     CU16: null,  // Copper 16oz — priced on request unless the admin sets a rate
     CU20: null,  // Copper 20oz — priced on request unless the admin sets a rate
     TPOC: 5.30,  // TPO-clad metal
@@ -936,6 +961,24 @@ export const outletPrice = (p, matCode) => {
   return Math.round(Math.max(MIN_PIECE, usd * mult) * BUILDER_MARKUP * builderMult() * 100) / 100;
 };
 export const outletPartNumber = (matCode, p) => `FT-CX-DO-${matCode}-${p.size}`;
+
+// ─── Vent pipe flashing (pitched-roof metal roof jack) — priced EACH ───
+// Estimate: developed metal (cone shell + square flange) at the material's
+// per-inch rate (rate/12 = $ per square inch) plus a fixed fabrication adder
+// for rolling the cone, seaming and soldering/sealing it to the flange.
+const JACK_FAB = 22;
+export const jackPrice = (p, matCode) => {
+  const base = String(matCode || "").split("-")[0];
+  if (Object.prototype.hasOwnProperty.call(PRICING.stretch, base) && PRICING.stretch[base] == null) return null; // copper — on request
+  const rB = Math.max(p.baseDia ?? 5, p.pipeDia) / 2, rT = p.pipeDia / 2;
+  const slant = Math.hypot(p.height, rB - rT);
+  const area = Math.PI * (rB + rT) * slant + (p.flange ?? 11) * (p.flange ?? 11);
+  const matCost = (area * (matByCode(matCode).rate || 0.26)) / 12;
+  return Math.round(Math.max(MIN_PIECE, matCost + JACK_FAB) * BUILDER_MARKUP * builderMult() * 100) / 100;
+};
+export const jackPartNumber = (matCode, p) => `FT-CX-VP-${matCode}-${String(p.pipeDia).replace(".", "")}P${String(p.pitch ?? 4).replace(".", "")}`;
+export const jackDescription = (matCode, p) =>
+  `Custom Vent Pipe Flashing — ${matByCode(matCode).name}, ${p.pipeDia}"⌀ pipe, ${p.baseDia}"⌀ cone base, ${p.height}" tall, ${p.flange}"×${p.flange}" square flange, pitched ${p.pitch}:12`;
 export const outletDescription = (matCode, p) => {
   const s = outletSize(p.size);
   return `Custom Gutter Drop Outlet — ${matByCode(matCode).name}, ${s.label}, ${p.drop}" drop tube, ${p.flange}" flange`;

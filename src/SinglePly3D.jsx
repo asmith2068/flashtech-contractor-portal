@@ -68,6 +68,26 @@ export default function SinglePly3D({ geo, materialCode = "TPO-W", split = false
     rims = [{ pts: close(co), w: 6 }, { pts: close(b), w: 9 }, { pts: close(tp), w: 5 }];
     if (split) rims.push({ line: [proj(...b[0]), proj(...tp[0])], w: 4 }); // split seam down a face
     shadowPts = close(co);
+  } else if (geo.shape === "jack") {
+    // Metal vent-pipe flashing: round tapered stack (sheared to the roof pitch)
+    // on a SQUARE flange that lies in the roof plane.
+    const { botR, topR, half, height: H } = geo;
+    const a0 = -Math.PI / 2;
+    for (let i = 0; i < N; i++) {
+      const aa = a0 + 2 * Math.PI * (i / N), ab = a0 + 2 * Math.PI * ((i + 1) / N);
+      pushQuad(cp(botR, 0, aa), cp(botR, 0, ab), cp(topR, H, ab), cp(topR, H, aa));
+    }
+    // flange: each cone-base segment maps to where its ray meets the square's edge
+    const sqPt = (a) => { const t = half / Math.max(Math.abs(Math.cos(a)), Math.abs(Math.sin(a))); return [t * Math.cos(a), 0, t * Math.sin(a)]; };
+    for (let i = 0; i < N; i++) {
+      const aa = a0 + 2 * Math.PI * (i / N), ab = a0 + 2 * Math.PI * ((i + 1) / N);
+      pushQuad(cp(botR, 0, aa), sqPt(aa), sqPt(ab), cp(botR, 0, ab));
+    }
+    const ring = (r, up) => { const a = []; for (let i = 0; i <= N; i++) a.push(proj(...cp(r, up, a0 + 2 * Math.PI * (i / N)))); return a; };
+    const close = (a) => [...a, a[0]].map((m) => proj(...m));
+    const sqc = sq(half, 0);
+    rims = [{ pts: close(sqc), w: 6 }, { pts: ring(botR, 0), w: 9 }, { pts: ring(topR, H), w: 5 }];
+    shadowPts = close(sqc);
   } else {
     const { botR, topR, flangeR, height: H } = geo;
     const gap = split ? 0.34 : 0;
@@ -94,7 +114,9 @@ export default function SinglePly3D({ geo, materialCode = "TPO-W", split = false
   const shade = (b) => `hsl(${mat.hue} ${mat.sat}% ${Math.max(16, Math.min(88, mat.lum * (0.45 + 0.75 * b)))}%)`;
   const edge = `hsl(${mat.hue} ${mat.sat + 6}% ${Math.max(12, mat.lum - 40)}%)`;
   const poly = (pts) => pts.map((p) => `${p[0]},${p[1]}`).join(" ");
-  const label = geo.shape === "scupper" ? "scupper drain" : (geo.tilt ? "mitered " : "") + (isSquare ? "square wrap" : geo.shape === "cone" ? "conical boot" : "cylindrical boot");
+  const label = geo.shape === "scupper" ? "scupper drain"
+    : geo.shape === "jack" ? "vent pipe flashing"
+    : (geo.tilt ? "mitered " : "") + (isSquare ? "square wrap" : geo.shape === "cone" ? "conical boot" : "cylindrical boot");
 
   return (
     <svg viewBox={vb} style={{ width: "100%", height, display: "block" }} preserveAspectRatio="xMidYMid meet">
