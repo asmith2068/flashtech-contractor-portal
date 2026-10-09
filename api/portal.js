@@ -246,6 +246,18 @@ export default async function handler(req, res) {
         if (!name) return res.status(400).json({ error: "Please enter your name." });
         if (!phone && !email) return res.status(400).json({ error: "Please give us a phone number or email so we can reach you." });
         const row = (label, v) => (v ? `<tr><td style="padding:4px 10px 4px 0;color:#6a7278;white-space:nowrap;vertical-align:top">${label}</td><td style="padding:4px 0;white-space:pre-line">${v.replace(/</g, "&lt;")}</td></tr>` : "");
+        // Keep a copy the admin can view in the portal (hidden row, same
+        // zero-migration pattern as pricing: sku "__APP__<id>", active=false).
+        try {
+          const appRow = {
+            at: new Date().toISOString(), name, phone, email,
+            address: s(f.address, 240), position: s(f.position, 80), startDate: s(f.startDate, 60),
+            pay: s(f.pay, 60), workAuth: s(f.workAuth, 10), experience: s(f.experience, 2500),
+            skills: s(f.skills, 1500), references: s(f.references, 1200), heard: s(f.heard, 200),
+          };
+          await db.from("portal_products").insert(
+            { sku: `__APP__${crypto.randomUUID()}`, category: "_settings", description: JSON.stringify(appRow), unit: "ea", price: 0, active: false });
+        } catch { /* storing is best-effort — the email below still goes out */ }
         const inner = `<p style="margin:0 0 12px"><b>New employment application</b> submitted from the Contractor Portal login page.</p>
 <table style="font-size:14px;border-collapse:collapse">${
   row("Name", name) + row("Phone", phone) + row("Email", email) + row("Address", s(f.address, 240)) +
@@ -484,6 +496,24 @@ export default async function handler(req, res) {
         const { error } = await db.from("portal_requests").update(patch).eq("id", body.reqId);
         if (error) return res.status(400).json({ error: error.message });
         return res.json({ ok: true, total });
+      }
+      // Employment applications — admin-only. Stored as hidden __APP__ rows.
+      case "listApplications": {
+        needAdmin();
+        const { data } = await db.from("portal_products").select("sku,description").eq("category", "_settings").eq("active", false);
+        const apps = [];
+        for (const r of data || []) {
+          if (!String(r.sku).startsWith("__APP__")) continue;
+          try { apps.push({ id: r.sku.slice(7), ...JSON.parse(r.description) }); } catch { /* skip a bad row */ }
+        }
+        apps.sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")));
+        return res.json({ applications: apps });
+      }
+      case "deleteApplication": {
+        needAdmin();
+        const { error } = await db.from("portal_products").delete().eq("sku", `__APP__${String(body.id || "")}`).eq("category", "_settings");
+        if (error) return res.status(400).json({ error: error.message });
+        return res.json({ ok: true });
       }
       // Distributor PO: attached by the request's distributor (or admin), stored in a
       // hidden row and NEVER returned to contractors. Empty po+note removes it.

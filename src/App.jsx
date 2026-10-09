@@ -2344,6 +2344,60 @@ function ContractorForm({ contractor, onClose, onSave, onDelete, onCreate, distr
 }
 
 // ─── ADMIN: TEAM / STAFF LOGINS ──────────────────────────────
+// ─── Employment applications — submitted from the login page, admin-only ───
+function AdminApplications() {
+  const [apps, setApps] = useState(null); // null = loading
+  const [open, setOpen] = useState(null); // expanded application id
+  const load = async () => {
+    try { setApps((await api("listApplications")).applications || []); }
+    catch { setApps([]); }
+  };
+  useEffect(() => { load(); }, []);
+  const del = async (a) => {
+    if (!window.confirm(`Delete the application from ${a.name}? This can't be undone.`)) return;
+    try { await api("deleteApplication", { id: a.id }); setApps((x) => x.filter((b) => b.id !== a.id)); }
+    catch (e) { alert("Could not delete: " + e.message); }
+  };
+  const Row = ({ label, v }) => (v ? <div style={{ marginBottom: 6 }}><span style={{ color: "var(--mut)", fontSize: 12, display: "block" }}>{label}</span><span style={{ whiteSpace: "pre-line" }}>{v}</span></div> : null);
+  return (
+    <div className="card" style={{ marginTop: 16 }}>
+      <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
+        <b>Employment Applications</b>
+        <button className="btn btn-o btn-sm" onClick={() => { setApps(null); load(); }}>Refresh</button>
+      </div>
+      <div style={{ fontSize: 13, color: "var(--mut)", marginBottom: 10 }}>Submitted from the sign-in page's "Join Our Team" button. Each one is also emailed to {NOTIFY_EMAIL}.</div>
+      {apps === null ? <small style={{ color: "var(--mut)" }}>Loading…</small>
+        : apps.length === 0 ? <small style={{ color: "var(--mut)" }}>No applications yet.</small>
+        : apps.map((a) => (
+        <div key={a.id} style={{ border: "1px solid var(--line)", borderRadius: 10, padding: "10px 14px", marginBottom: 8 }}>
+          <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap", cursor: "pointer" }} onClick={() => setOpen(open === a.id ? null : a.id)}>
+            <span><b>{a.name}</b>{a.position ? <span style={{ color: "var(--mut)" }}> — {a.position}</span> : null}</span>
+            <span style={{ fontSize: 12, color: "var(--mut)" }}>{a.at ? fmtDateTime(a.at) : ""} {open === a.id ? "▴" : "▾"}</span>
+          </div>
+          <div style={{ fontSize: 13, color: "var(--mut)" }}>
+            {[a.phone, a.email, a.address].filter(Boolean).join(" · ")}
+          </div>
+          {open === a.id && (
+            <div style={{ marginTop: 10, borderTop: "1px solid var(--line)", paddingTop: 10, fontSize: 14 }}>
+              <div className="g2">
+                <div><Row label="Available to start" v={a.startDate} /><Row label="Desired pay" v={a.pay} /><Row label="Authorized to work in the US" v={a.workAuth} /><Row label="Heard about us via" v={a.heard} /></div>
+                <div><Row label="References" v={a.references} /></div>
+              </div>
+              <Row label="Work experience" v={a.experience} />
+              <Row label="Skills & equipment" v={a.skills} />
+              <div className="row" style={{ justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
+                {a.email && <a className="btn btn-o btn-sm" href={`mailto:${a.email}`}>Email applicant</a>}
+                {a.phone && <a className="btn btn-o btn-sm" href={`tel:${a.phone.replace(/[^+\d]/g, "")}`}>Call</a>}
+                <button className="btn btn-d btn-sm" onClick={() => del(a)}>{IC.trash}&nbsp;Delete</button>
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function AdminUsers({ users, meId, onCreate, onSave, onDelete }) {
   const [edit, setEdit] = useState(null);
   const [adding, setAdding] = useState(false);
@@ -3378,7 +3432,10 @@ export default function App() {
           {page === "dashboard" && (isAdmin || isDist) && <AdminDashboard requests={requests} msgs={msgs} contractorsById={contractorsById} onOpen={openRequest} onNav={goRequests} />}
           {page === "customers" && isAdmin && <AdminCustomers contractors={contractors} requests={requests} onSave={saveContractor} onDelete={deleteContractor} onCreate={createContractor} onNotify={notifyContractor} distributors={staff.filter((u) => u.role === "distributor")} />}
           {page === "customers" && isDist && <DistributorCustomers me={session} contractors={contractors} requests={requests} invites={invites} onSave={saveContractor} onCreate={createContractor} onNotify={notifyContractor} onGenPin={genPin} onRevokePin={revokePin} />}
-          {page === "team" && isAdmin && <AdminUsers users={staff} meId={session.id} onCreate={createUser} onSave={saveUser} onDelete={deleteUser} />}
+          {page === "team" && isAdmin && <>
+            <AdminUsers users={staff} meId={session.id} onCreate={createUser} onSave={saveUser} onDelete={deleteUser} />
+            <AdminApplications />
+          </>}
           {page === "pricing" && isAdmin && <AdminPricing products={products} contractors={contractors} overrides={custPricing} onSave={savePricing} onSaveCustomer={saveCustomerPricing} />}
           {page === "downloads" && <DownloadsPage />}
           {page === "shop" && !isAdmin && !isDist && <ShopPage products={products} discPct={discPct} onPickCategory={openCategory} onBuilder={openBuilder} />}

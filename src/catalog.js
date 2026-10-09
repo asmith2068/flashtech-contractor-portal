@@ -192,6 +192,7 @@ export const DRAWINGS = [
   { id: "louver-vent", title: "Louver Vent", file: "/drawings/louver-vent.pdf", category: "Vents", note: "Dimensions" },
   { id: "6in-t-top", title: "6\" T-Top Vent", file: "/drawings/6in-t-top.pdf", category: "Vents", note: "Dimensions" },
   { id: "bowl-drain", title: "Bowl Drain (TPO/PVC)", file: "/drawings/bowl-drain-tpo-pvc.pdf", category: "Drains", note: "TPO / PVC" },
+  { id: "bowl-drain-copper", title: "Bowl Drain (20 oz Copper)", file: "/drawings/bowl-drain-copper.pdf", category: "Drains", note: "20 oz copper plate & hub · stainless basket" },
   { id: "basket-drain-overflow", title: "Basket Drain + Overflow (Combo)", file: "/drawings/basket-drain-overflow.pdf", category: "Drains", note: "Combo assembly" },
   { id: "scupper-overflow", title: "Scupper Overflow", file: "/drawings/scupper-overflow.pdf", category: "Scuppers", note: "TPO/PVC coated + stainless" },
   { id: "pitch-pocket", title: "Pitch Pocket", file: "/drawings/pitch-pocket.pdf", category: "Sealant Pockets & Ovals", note: "Dimensions" },
